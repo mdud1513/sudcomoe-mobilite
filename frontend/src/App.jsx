@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api.js";
 import ClientView from "./components/ClientView.jsx";
 import DriverView from "./components/DriverView.jsx";
+import AdminView from "./components/AdminView.jsx";
 
 export default function App() {
   const [role, setRole] = useState("client");
@@ -33,10 +34,13 @@ export default function App() {
 
         <div className="role-switch">
           <button className={role === "client" ? "is-active" : ""} onClick={() => setRole("client")}>
-            Je suis client
+            Client
           </button>
           <button className={role === "chauffeur" ? "is-active" : ""} onClick={() => setRole("chauffeur")}>
-            Je suis chauffeur
+            Chauffeur
+          </button>
+          <button className={role === "admin" ? "is-active" : ""} onClick={() => setRole("admin")}>
+            Admin
           </button>
         </div>
       </header>
@@ -55,8 +59,15 @@ export default function App() {
         {!erreurApi && zones.length > 0 && (
           role === "client" ? (
             <ClientView zones={zones} onToast={showToast} />
+          ) : role === "chauffeur" ? (
+            <DriverView
+              chauffeurs={chauffeurs}
+              zones={zones}
+              onToast={showToast}
+              onChauffeurAjoute={(nouveau) => setChauffeurs((prev) => [...prev, nouveau])}
+            />
           ) : (
-            <DriverView chauffeurs={chauffeurs} onToast={showToast} />
+            <AdminView onToast={showToast} />
           )
         )}
       </main>

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
+import DriverRegister from "./DriverRegister.jsx";
 
-export default function DriverView({ chauffeurs, onToast }) {
+export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjoute }) {
+  const [inscription, setInscription] = useState(false);
   const [chauffeurId, setChauffeurId] = useState(chauffeurs[0]?.id || "");
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
@@ -45,8 +47,33 @@ export default function DriverView({ chauffeurs, onToast }) {
     }
   }
 
+  if (inscription) {
+    return (
+      <DriverRegister
+        zones={zones}
+        onToast={onToast}
+        onAnnuler={() => setInscription(false)}
+        onInscrit={(nouveau) => {
+          setInscription(false);
+          onChauffeurAjoute(nouveau);
+          setChauffeurId(nouveau.id);
+        }}
+      />
+    );
+  }
+
   if (!chauffeur) {
-    return <p className="card__hint">Aucun chauffeur affilié enregistré.</p>;
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <div className="empty-state__glyph">—</div>
+          Aucun chauffeur affilié enregistré.
+        </div>
+        <button className="btn btn--accent" style={{ marginTop: 12 }} onClick={() => setInscription(true)}>
+          Devenir chauffeur affilié
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -60,6 +87,9 @@ export default function DriverView({ chauffeurs, onToast }) {
             ))}
           </select>
         </div>
+        <button className="btn btn--outline" style={{ marginBottom: 12 }} onClick={() => setInscription(true)}>
+          + Nouveau chauffeur : s'inscrire
+        </button>
         <div className="driver-badge">
           <div className="driver-badge__avatar">{chauffeur.nom.split(" ").map((n) => n[0]).join("")}</div>
           <div>
@@ -78,7 +108,16 @@ export default function DriverView({ chauffeurs, onToast }) {
         )}
       </div>
 
-      {courseActive ? (
+      {chauffeur.statut !== "actif" ? (
+        <div className="card" style={{ marginTop: 16 }}>
+          <p className="card__title" style={{ fontSize: 15 }}>Inscription en attente de validation</p>
+          <p className="card__hint" style={{ marginBottom: 0 }}>
+            Statut : <span className="pill">{chauffeur.statut}</span>. L'équipe Sud-Comoé Mobilité doit
+            confirmer le diagnostic gaz et la signature du contrat d'affiliation avant que vous puissiez
+            accepter des courses.
+          </p>
+        </div>
+      ) : courseActive ? (
         <div style={{ marginTop: 16 }}>
           <p className="section-label">Course en cours</p>
           <div style={{ height: 8 }} />

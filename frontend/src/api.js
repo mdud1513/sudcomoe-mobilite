@@ -21,4 +21,6 @@ export const api = {
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
   solde: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/solde`),
+  inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
+  validerChauffeur: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST" }),
 };

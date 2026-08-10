@@ -30,6 +30,47 @@ app.get("/api/chauffeurs", async () => {
     }));
 });
 
+// Inscription d'un nouveau chauffeur affilié
+app.post("/api/chauffeurs", async (req, reply) => {
+  const { nom, telephone, zone, immatriculation } = req.body || {};
+  if (!nom || !telephone || !zone || !immatriculation) {
+    return reply.code(400).send({ erreur: "nom, telephone, zone et immatriculation sont requis." });
+  }
+  if (!ZONES.includes(zone)) {
+    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
+  }
+  await db.read();
+  const telephoneExiste = db.data.users.some((u) => u.telephone === telephone);
+  if (telephoneExiste) {
+    return reply.code(409).send({ erreur: "Un chauffeur est déjà enregistré avec ce numéro." });
+  }
+
+  const chauffeurId = id("u");
+  const nbChauffeurs = db.data.users.filter((u) => u.role === "chauffeur").length;
+  const badge = `SCM-${String(nbChauffeurs + 1).padStart(3, "0")}`;
+
+  const chauffeur = {
+    id: chauffeurId,
+    role: "chauffeur",
+    nom,
+    telephone,
+    zone,
+    statut: "en attente de validation", // à valider par l'équipe avant première course (diagnostic gaz, contrat)
+    badge,
+  };
+  const vehicule = {
+    id: id("v"),
+    chauffeurId,
+    immatriculation,
+    kitGpl: "à diagnostiquer",
+    dernierControle: null,
+  };
+  db.data.users.push(chauffeur);
+  db.data.vehicles.push(vehicule);
+  await db.write();
+  return reply.code(201).send({ ...chauffeur, vehicule });
+});
+
 // ---------- Courses ----------
 
 // Client crée une demande de course
@@ -86,6 +127,9 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
   if (ride.statut !== "demandee") return reply.code(409).send({ erreur: "Cette course n'est plus disponible." });
   const chauffeur = db.data.users.find((u) => u.id === chauffeurId && u.role === "chauffeur");
   if (!chauffeur) return reply.code(400).send({ erreur: "Chauffeur inconnu." });
+  if (chauffeur.statut !== "actif") {
+    return reply.code(403).send({ erreur: "Inscription en attente de validation (diagnostic gaz et signature du contrat requis avant la première course)." });
+  }
 
   ride.statut = "confirmee";
   ride.chauffeurId = chauffeurId;
@@ -137,6 +181,18 @@ app.get("/api/chauffeurs/:chauffeurId/solde", async (req, reply) => {
   );
   const commissionDue = rides.reduce((sum, r) => sum + (r.commission || 0), 0);
   return { chauffeurId: req.params.chauffeurId, commissionDueEspeces: commissionDue, nbCourses: rides.length };
+});
+
+// Validation d'un chauffeur par l'équipe (après diagnostic gaz + signature du contrat)
+app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
+  await db.read();
+  const chauffeur = db.data.users.find((u) => u.id === req.params.chauffeurId && u.role === "chauffeur");
+  if (!chauffeur) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  chauffeur.statut = "actif";
+  const vehicule = db.data.vehicles.find((v) => v.chauffeurId === chauffeur.id);
+  if (vehicule) vehicule.kitGpl = "posé";
+  await db.write();
+  return { ...chauffeur, vehicule };
 });
 
 app.get("/api/health", async () => ({ ok: true }));
