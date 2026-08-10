@@ -20,6 +20,7 @@ export default function Ticket({ course, children }) {
         </div>
         <div className="ticket__meta">
           {course.clientNom}
+          {course.nombrePassagers ? ` · ${course.nombrePassagers} passager${course.nombrePassagers > 1 ? "s" : ""}` : ""}
           {course.chauffeur ? ` · Chauffeur : ${course.chauffeur.nom} (${course.chauffeur.badge})` : ""}
         </div>
         {children}

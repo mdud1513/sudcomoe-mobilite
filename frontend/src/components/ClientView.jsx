@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
 
 export default function ClientView({ zones, onToast }) {
-  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "" });
+  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", nombrePassagers: 1 });
   const [course, setCourse] = useState(null);
   const [modePaiement, setModePaiement] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -156,6 +156,22 @@ export default function ClientView({ zones, onToast }) {
           <select id="zoneArrivee" value={form.zoneArrivee} onChange={handleChange("zoneArrivee")}>
             {zones.map((z) => <option key={z} value={z}>{z}</option>)}
           </select>
+        </div>
+      </div>
+
+      <div className="field" style={{ marginBottom: 0 }}>
+        <label>Nombre de passagers</label>
+        <div className="pay-choice" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={form.nombrePassagers === n ? "is-selected" : ""}
+              onClick={() => setForm((f) => ({ ...f, nombrePassagers: n }))}
+            >
+              {n}
+            </button>
+          ))}
         </div>
       </div>
 

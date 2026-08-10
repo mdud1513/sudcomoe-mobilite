@@ -98,13 +98,14 @@ app.get("/api/admin/liste", async (req, reply) => {
   return db.data.admins.map((a) => ({ nom: a.nom, telephone: a.telephone }));
 });
 
-function tarif(zoneDepart, zoneArrivee) {
-  if (zoneDepart === zoneArrivee) {
-    // course locale : 500 à 1000 FCFA
-    return 500 + Math.floor(Math.random() * 6) * 100;
-  }
-  // course périphérique : au-delà de 1000 FCFA
-  return 1200 + Math.floor(Math.random() * 9) * 100;
+const FOURCHETTES_LOCALE = { 1: [500, 800], 2: [800, 1000], 3: [1000, 1200], 4: [1200, 1400] };
+const FOURCHETTES_INTER_ZONE = { 1: [800, 1400], 2: [1400, 1700], 3: [1700, 2000], 4: [2000, 2300] };
+
+function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
+  const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
+  const [min, max] = zoneDepart === zoneArrivee ? FOURCHETTES_LOCALE[n] : FOURCHETTES_INTER_ZONE[n];
+  const pas = Math.floor((max - min) / 100) + 1;
+  return min + Math.floor(Math.random() * pas) * 100;
 }
 
 // ---------- Référentiel ----------
@@ -165,10 +166,11 @@ app.post("/api/chauffeurs", async (req, reply) => {
 
 // Client crée une demande de course
 app.post("/api/rides", async (req, reply) => {
-  const { clientNom, clientTelephone, zoneDepart, zoneArrivee } = req.body || {};
+  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, nombrePassagers } = req.body || {};
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
   }
+  const passagers = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
   await db.read();
   const ride = {
     id: id("ride"),
@@ -176,7 +178,8 @@ app.post("/api/rides", async (req, reply) => {
     clientTelephone,
     zoneDepart,
     zoneArrivee,
-    montant: tarif(zoneDepart, zoneArrivee),
+    nombrePassagers: passagers,
+    montant: tarif(zoneDepart, zoneArrivee, passagers),
     statut: "demandee", // demandee -> confirmee -> terminee | annulee
     chauffeurId: null,
     modePaiement: null,
