@@ -4,8 +4,17 @@ import ClientView from "./components/ClientView.jsx";
 import DriverView from "./components/DriverView.jsx";
 import AdminView from "./components/AdminView.jsx";
 
+const CLE_SESSION_ADMIN = "scm_admin_session";
+
+function accesAdminAutorise() {
+  const parametreUrl = new URLSearchParams(window.location.search).has("admin");
+  const sessionExistante = !!localStorage.getItem(CLE_SESSION_ADMIN);
+  return parametreUrl || sessionExistante;
+}
+
 export default function App() {
-  const [role, setRole] = useState("client");
+  const [peutVoirAdmin] = useState(accesAdminAutorise);
+  const [role, setRole] = useState(() => (accesAdminAutorise() && new URLSearchParams(window.location.search).has("admin") ? "admin" : "client"));
   const [zones, setZones] = useState([]);
   const [chauffeurs, setChauffeurs] = useState([]);
   const [toast, setToast] = useState(null);
@@ -39,9 +48,11 @@ export default function App() {
           <button className={role === "chauffeur" ? "is-active" : ""} onClick={() => setRole("chauffeur")}>
             Chauffeur
           </button>
-          <button className={role === "admin" ? "is-active" : ""} onClick={() => setRole("admin")}>
-            Admin
-          </button>
+          {peutVoirAdmin && (
+            <button className={role === "admin" ? "is-active" : ""} onClick={() => setRole("admin")}>
+              Admin
+            </button>
+          )}
         </div>
       </header>
 
