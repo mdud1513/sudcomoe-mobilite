@@ -2,8 +2,8 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8787";
 
 async function request(path, options = {}) {
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.erreur || "Une erreur est survenue.");
@@ -22,5 +22,11 @@ export const api = {
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
   solde: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/solde`),
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
-  validerChauffeur: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST" }),
+  validerChauffeur: (chauffeurId, token) =>
+    request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  adminExiste: () => request("/api/admin/existe"),
+  adminBootstrap: (payload) => request("/api/admin/bootstrap", { method: "POST", body: JSON.stringify(payload) }),
+  adminConnexion: (payload) => request("/api/admin/connexion", { method: "POST", body: JSON.stringify(payload) }),
+  adminInviter: (payload, token) =>
+    request("/api/admin/inviter", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
 };

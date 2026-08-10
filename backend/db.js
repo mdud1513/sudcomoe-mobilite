@@ -19,6 +19,7 @@ const defaultData = {
     { id: "v_3", chauffeurId: "u_driver3", immatriculation: "CI-9012-EF", kitGpl: "non posé", dernierControle: null },
   ],
   rides: [],
+  admins: [],
 };
 
 export const db = new Low(adapter, defaultData);

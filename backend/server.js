@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { db, id } from "./db.js";
 
 const app = Fastify({ logger: false });
@@ -7,6 +8,95 @@ await app.register(cors, { origin: true });
 
 const ZONES = ["Yaou", "Grand-Bassam", "Bonoua", "Samo"];
 const COMMISSION_RATE = 0.12;
+
+function hashMotDePasse(motDePasse) {
+  const sel = randomBytes(16).toString("hex");
+  const hash = scryptSync(motDePasse, sel, 64).toString("hex");
+  return `${sel}:${hash}`;
+}
+
+function verifierMotDePasse(motDePasse, stocke) {
+  const [sel, hash] = stocke.split(":");
+  const hashEssai = scryptSync(motDePasse, sel, 64).toString("hex");
+  const a = Buffer.from(hash, "hex");
+  const b = Buffer.from(hashEssai, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function requireAdmin(req, reply) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  await db.read();
+  const admin = token ? db.data.admins.find((a) => a.token === token) : null;
+  if (!admin) {
+    reply.code(401).send({ erreur: "Authentification admin requise." });
+    return null;
+  }
+  return admin;
+}
+
+// ---------- Authentification admin ----------
+
+// Indique s'il faut créer le tout premier compte admin (aucun admin existant)
+app.get("/api/admin/existe", async () => {
+  await db.read();
+  return { existe: db.data.admins.length > 0 };
+});
+
+// Création du tout premier admin — accessible uniquement si aucun admin n'existe encore
+app.post("/api/admin/bootstrap", async (req, reply) => {
+  const { nom, telephone, motDePasse } = req.body || {};
+  await db.read();
+  if (db.data.admins.length > 0) {
+    return reply.code(409).send({ erreur: "Un compte admin existe déjà. Demandez une invitation." });
+  }
+  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
+    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
+  }
+  const token = id("tok");
+  const admin = { id: id("admin"), nom, telephone, motDePasseHash: hashMotDePasse(motDePasse), token };
+  db.data.admins.push(admin);
+  await db.write();
+  return reply.code(201).send({ nom: admin.nom, telephone: admin.telephone, token });
+});
+
+// Connexion d'un admin existant
+app.post("/api/admin/connexion", async (req, reply) => {
+  const { telephone, motDePasse } = req.body || {};
+  await db.read();
+  const admin = db.data.admins.find((a) => a.telephone === telephone);
+  if (!admin || !verifierMotDePasse(motDePasse || "", admin.motDePasseHash)) {
+    return reply.code(401).send({ erreur: "Numéro ou mot de passe incorrect." });
+  }
+  admin.token = id("tok"); // un seul token actif à la fois, suffisant pour le prototype
+  await db.write();
+  return { nom: admin.nom, telephone: admin.telephone, token: admin.token };
+});
+
+// Invitation d'un nouvel admin — nécessite d'être déjà connecté
+app.post("/api/admin/inviter", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { nom, telephone, motDePasse } = req.body || {};
+  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
+    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
+  }
+  await db.read();
+  if (db.data.admins.some((a) => a.telephone === telephone)) {
+    return reply.code(409).send({ erreur: "Un admin existe déjà avec ce numéro." });
+  }
+  const admin = { id: id("admin"), nom, telephone, motDePasseHash: hashMotDePasse(motDePasse), token: null };
+  db.data.admins.push(admin);
+  await db.write();
+  return reply.code(201).send({ nom: admin.nom, telephone: admin.telephone });
+});
+
+app.get("/api/admin/liste", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  await db.read();
+  return db.data.admins.map((a) => ({ nom: a.nom, telephone: a.telephone }));
+});
 
 function tarif(zoneDepart, zoneArrivee) {
   if (zoneDepart === zoneArrivee) {
@@ -185,6 +275,8 @@ app.get("/api/chauffeurs/:chauffeurId/solde", async (req, reply) => {
 
 // Validation d'un chauffeur par l'équipe (après diagnostic gaz + signature du contrat)
 app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
   await db.read();
   const chauffeur = db.data.users.find((u) => u.id === req.params.chauffeurId && u.role === "chauffeur");
   if (!chauffeur) return reply.code(404).send({ erreur: "Chauffeur introuvable." });

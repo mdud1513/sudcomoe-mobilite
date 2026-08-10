@@ -1,9 +1,33 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import AdminLogin from "./AdminLogin.jsx";
+
+const CLE_SESSION = "scm_admin_session";
 
 export default function AdminView({ onToast }) {
+  const [session, setSession] = useState(() => {
+    try {
+      const brut = localStorage.getItem(CLE_SESSION);
+      return brut ? JSON.parse(brut) : null;
+    } catch {
+      return null;
+    }
+  });
   const [chauffeurs, setChauffeurs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [inviter, setInviter] = useState(false);
+  const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
+
+  function connecte(nouvelleSession) {
+    localStorage.setItem(CLE_SESSION, JSON.stringify(nouvelleSession));
+    setSession(nouvelleSession);
+    onToast(`Bienvenue, ${nouvelleSession.nom}.`);
+  }
+
+  function deconnecter() {
+    localStorage.removeItem(CLE_SESSION);
+    setSession(null);
+  }
 
   async function charger() {
     try {
@@ -17,29 +41,93 @@ export default function AdminView({ onToast }) {
   }
 
   useEffect(() => {
+    if (!session) return;
     charger();
     const t = setInterval(charger, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [session?.token]);
 
   async function valider(id) {
     try {
-      await api.validerChauffeur(id);
+      await api.validerChauffeur(id, session.token);
       onToast("Chauffeur validé et activé.");
       charger();
+    } catch (err) {
+      if (err.message.includes("Authentification")) {
+        onToast("Session expirée, reconnectez-vous.");
+        deconnecter();
+        return;
+      }
+      onToast(err.message);
+    }
+  }
+
+  async function envoyerInvitation(e) {
+    e.preventDefault();
+    if (!formInvite.nom || !formInvite.telephone || formInvite.motDePasse.length < 6) {
+      onToast("Nom, téléphone et mot de passe (6 caractères min.) sont requis.");
+      return;
+    }
+    try {
+      await api.adminInviter(formInvite, session.token);
+      onToast(`${formInvite.nom} peut maintenant se connecter en tant qu'admin.`);
+      setFormInvite({ nom: "", telephone: "", motDePasse: "" });
+      setInviter(false);
     } catch (err) {
       onToast(err.message);
     }
   }
 
-  const enAttente = chauffeurs.filter((c) => c.statut !== "actif");
-  const actifs = chauffeurs.filter((c) => c.statut === "actif");
+  if (!session) {
+    return <AdminLogin onConnecte={connecte} onToast={onToast} />;
+  }
 
   if (loading) return <p className="card__hint">Chargement…</p>;
 
+  const enAttente = chauffeurs.filter((c) => c.statut !== "actif");
+  const actifs = chauffeurs.filter((c) => c.statut === "actif");
+
   return (
     <div>
+      <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <p className="card__title" style={{ fontSize: 15, marginBottom: 0 }}>Connecté : {session.nom}</p>
+        </div>
+        <button className="btn btn--outline" style={{ width: "auto", padding: "8px 14px" }} onClick={deconnecter}>
+          Déconnexion
+        </button>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      {inviter ? (
+        <form className="card" onSubmit={envoyerInvitation}>
+          <p className="card__title" style={{ fontSize: 15 }}>Inviter un autre admin</p>
+          <div className="field">
+            <label htmlFor="inom">Nom complet</label>
+            <input id="inom" value={formInvite.nom} onChange={(e) => setFormInvite((f) => ({ ...f, nom: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label htmlFor="itel">Téléphone</label>
+            <input id="itel" value={formInvite.telephone} onChange={(e) => setFormInvite((f) => ({ ...f, telephone: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label htmlFor="imdp">Mot de passe provisoire</label>
+            <input id="imdp" type="password" value={formInvite.motDePasse} onChange={(e) => setFormInvite((f) => ({ ...f, motDePasse: e.target.value }))} />
+          </div>
+          <div className="btn-row">
+            <button type="button" className="btn btn--outline" onClick={() => setInviter(false)}>Annuler</button>
+            <button type="submit" className="btn btn--primary">Inviter</button>
+          </div>
+        </form>
+      ) : (
+        <button className="btn btn--outline" onClick={() => setInviter(true)}>
+          + Inviter un autre admin
+        </button>
+      )}
+
+      <div style={{ height: 20 }} />
       <p className="section-label">En attente de validation ({enAttente.length})</p>
       <div style={{ height: 8 }} />
       {enAttente.length === 0 ? (
