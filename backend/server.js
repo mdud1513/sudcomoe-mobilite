@@ -582,6 +582,7 @@ app.post("/api/rides", async (req, reply) => {
     ? arrets.slice(0, 3).map((a) => ({
         nom: typeof a?.nom === "string" ? a.nom.slice(0, 60) : "",
         zone: ZONES.includes(a?.zone) ? a.zone : zoneDepart,
+        lieu: typeof a?.lieu === "string" ? a.lieu.slice(0, 100) : "",
         position:
           a?.position && typeof a.position.lat === "number" && typeof a.position.lng === "number"
             ? a.position
@@ -743,6 +744,49 @@ app.post("/api/rides/:rideId/annuler", async (req, reply) => {
     [JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString() }]), req.params.rideId]
   );
   return versRideDTO(rows[0]);
+});
+
+app.post("/api/rides/:rideId/signaler", async (req, reply) => {
+  const { auteur, message } = req.body || {};
+  if (!["client", "chauffeur"].includes(auteur) || !message || !message.trim()) {
+    return reply.code(400).send({ erreur: "auteur ('client' ou 'chauffeur') et message sont requis." });
+  }
+  const { rows: existant } = await pool.query("SELECT id FROM rides WHERE id = $1", [req.params.rideId]);
+  if (!existant[0]) return reply.code(404).send({ erreur: "Course introuvable." });
+
+  await pool.query(
+    `INSERT INTO signalements (id, ride_id, auteur, message) VALUES ($1,$2,$3,$4)`,
+    [id("sig"), req.params.rideId, auteur, message.trim().slice(0, 500)]
+  );
+  return reply.code(201).send({ enregistre: true });
+});
+
+app.get("/api/admin/signalements", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query(
+    `SELECT s.*, r.zone_depart, r.zone_arrivee, r.client_nom
+     FROM signalements s LEFT JOIN rides r ON r.id = s.ride_id
+     ORDER BY s.cree_le DESC LIMIT 50`
+  );
+  return rows.map((s) => ({
+    id: s.id,
+    rideId: s.ride_id,
+    auteur: s.auteur,
+    message: s.message,
+    traite: s.traite,
+    creeLe: s.cree_le,
+    zoneDepart: s.zone_depart,
+    zoneArrivee: s.zone_arrivee,
+    clientNom: s.client_nom,
+  }));
+});
+
+app.post("/api/admin/signalements/:signalementId/traiter", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  await pool.query("UPDATE signalements SET traite = true WHERE id = $1", [req.params.signalementId]);
+  return { traite: true };
 });
 
 app.get("/api/health", async () => ({ ok: true }));

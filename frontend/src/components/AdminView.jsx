@@ -15,6 +15,7 @@ export default function AdminView({ onToast }) {
   });
   const [chauffeurs, setChauffeurs] = useState([]);
   const [stats, setStats] = useState(null);
+  const [signalements, setSignalements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [inviter, setInviter] = useState(false);
   const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
@@ -31,9 +32,10 @@ export default function AdminView({ onToast }) {
   }
 
   async function charger() {
-    const [resultatChauffeurs, resultatStats] = await Promise.allSettled([
+    const [resultatChauffeurs, resultatStats, resultatSignalements] = await Promise.allSettled([
       api.chauffeurs(),
       api.adminStatistiques(session.token),
+      api.adminSignalements(session.token),
     ]);
 
     if (resultatChauffeurs.status === "fulfilled") {
@@ -48,6 +50,10 @@ export default function AdminView({ onToast }) {
       onToast("Session expirée — reconnectez-vous.");
       deconnecter();
       return;
+    }
+
+    if (resultatSignalements.status === "fulfilled") {
+      setSignalements(resultatSignalements.value);
     }
 
     setLoading(false);
@@ -89,6 +95,15 @@ export default function AdminView({ onToast }) {
         deconnecter();
         return;
       }
+      onToast(err.message);
+    }
+  }
+
+  async function marquerTraite(id) {
+    try {
+      await api.traiterSignalement(id, session.token);
+      charger();
+    } catch (err) {
       onToast(err.message);
     }
   }
@@ -229,6 +244,30 @@ export default function AdminView({ onToast }) {
               ))}
             </div>
           )}
+        </>
+      )}
+
+      {signalements.filter((s) => !s.traite).length > 0 && (
+        <>
+          <div style={{ height: 20 }} />
+          <p className="section-label">Signalements non traités ({signalements.filter((s) => !s.traite).length})</p>
+          <div style={{ height: 8 }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {signalements.filter((s) => !s.traite).map((s) => (
+              <div key={s.id} className="card" style={{ padding: 14 }}>
+                <p className="card__hint" style={{ marginBottom: 6 }}>
+                  <span className="pill" style={{ background: "var(--color-danger-tint)", color: "var(--color-danger)" }}>
+                    {s.auteur === "client" ? "Signalé par le client" : "Signalé par le chauffeur"}
+                  </span>
+                  {" "}· {s.zoneDepart} → {s.zoneArrivee} · {s.clientNom}
+                </p>
+                <p style={{ fontSize: 14, marginBottom: 10 }}>{s.message}</p>
+                <button className="btn btn--outline" style={{ width: "auto", padding: "8px 14px", fontSize: 12.5 }} onClick={() => marquerTraite(s.id)}>
+                  Marquer comme traité
+                </button>
+              </div>
+            ))}
+          </div>
         </>
       )}
 

@@ -99,6 +99,17 @@ export async function initDb() {
 
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS client_id TEXT REFERENCES clients(id);`);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS signalements (
+      id TEXT PRIMARY KEY,
+      ride_id TEXT REFERENCES rides(id),
+      auteur TEXT NOT NULL,
+      message TEXT NOT NULL,
+      traite BOOLEAN NOT NULL DEFAULT false,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
   // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
   if (rows[0].n === 0) {

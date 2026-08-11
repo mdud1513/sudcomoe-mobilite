@@ -63,7 +63,7 @@ export default function ClientView({ zones, onToast }) {
     setArrets((prev) => {
       const next = prev.slice(0, nbArretsRequis);
       while (next.length < nbArretsRequis) {
-        next.push({ nom: "", zone: form.zoneDepart, position: null, localisation: "inactif" });
+        next.push({ nom: "", zone: form.zoneDepart, lieu: "", position: null, localisation: "inactif" });
       }
       return next;
     });
@@ -189,7 +189,7 @@ export default function ClientView({ zones, onToast }) {
         {
           ...form,
           position,
-          arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, position: a.position })),
+          arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, lieu: a.lieu, position: a.position })),
         },
         session?.token
       );
@@ -264,7 +264,7 @@ export default function ClientView({ zones, onToast }) {
   if (course) {
     return (
       <div>
-        <Ticket course={course} />
+        <Ticket course={course} contact={course.chauffeur} role="client" onToast={onToast} />
 
         {course.statut === "demandee" && (
           <div style={{ marginTop: 16 }}>
@@ -477,6 +477,14 @@ export default function ClientView({ zones, onToast }) {
                 <select value={arret.zone} onChange={(e) => majArret(i, "zone", e.target.value)}>
                   {zones.map((z) => <option key={z} value={z}>{z}</option>)}
                 </select>
+              </div>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label>Lieu précis (facultatif)</label>
+                <input
+                  value={arret.lieu || ""}
+                  onChange={(e) => majArret(i, "lieu", e.target.value)}
+                  placeholder="Ex. Devant la pharmacie, chez le tailleur..."
+                />
               </div>
               <div className="btn-row">
                 <button

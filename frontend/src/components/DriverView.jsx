@@ -211,7 +211,12 @@ export default function DriverView({ zones, onToast }) {
         <div style={{ marginTop: 16 }}>
           <p className="section-label">Course en cours</p>
           <div style={{ height: 8 }} />
-          <Ticket course={courseActive} />
+          <Ticket
+            course={courseActive}
+            contact={{ nom: courseActive.clientNom, telephone: courseActive.clientTelephone }}
+            role="chauffeur"
+            onToast={onToast}
+          />
           <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
             En attente de la confirmation d'arrivée par le client.
           </p>

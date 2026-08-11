@@ -1,3 +1,6 @@
+import { lienAppel, lienWhatsApp } from "../contact.js";
+import { api } from "../api.js";
+
 const STATUT_LABELS = {
   demandee: "Recherche d'un chauffeur",
   confirmee: "Chauffeur en route",
@@ -5,8 +8,20 @@ const STATUT_LABELS = {
   annulee: "Course annulée",
 };
 
-export default function Ticket({ course, children }) {
+export default function Ticket({ course, children, contact, role, onToast }) {
   const statut = course.statut;
+
+  async function signaler() {
+    const message = window.prompt("Décrivez le problème rencontré avec cette course :", "");
+    if (!message || !message.trim()) return;
+    try {
+      await api.signaler(course.id, role || "client", message);
+      onToast?.("Signalement envoyé — l'équipe va le consulter.");
+    } catch (err) {
+      onToast?.(err.message);
+    }
+  }
+
   return (
     <div className="ticket">
       <div className="ticket__main">
@@ -61,6 +76,7 @@ export default function Ticket({ course, children }) {
             {course.arrets.map((a, i) => (
               <div key={i} style={{ fontSize: 13, marginBottom: 3 }}>
                 {a.nom || `Passager ${i + 2}`} — {a.zone}
+                {a.lieu && <span style={{ color: "var(--color-ink-soft)" }}> ({a.lieu})</span>}
                 {a.surLeChemin ? (
                   <span style={{ color: "var(--color-success)" }}> · sur le chemin</span>
                 ) : typeof a.distanceKm === "number" ? (
@@ -85,6 +101,33 @@ export default function Ticket({ course, children }) {
           </div>
         )}
         {children}
+
+        {contact && ["confirmee", "terminee"].includes(statut) && (
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <a href={lienAppel(contact.telephone)} className="btn btn--primary" style={{ textDecoration: "none", textAlign: "center" }}>
+              📞 Appeler {contact.nom?.split(" ")[0] || ""}
+            </a>
+            <a
+              href={lienWhatsApp(contact.telephone, `Bonjour, au sujet de la course ${course.id.replace("ride_", "SCM-").toUpperCase()}`)}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn--outline"
+              style={{ textDecoration: "none", textAlign: "center" }}
+            >
+              💬 WhatsApp
+            </a>
+          </div>
+        )}
+
+        {["confirmee", "terminee"].includes(statut) && (
+          <button
+            type="button"
+            onClick={signaler}
+            style={{ border: "none", background: "transparent", color: "var(--color-danger)", fontSize: 12.5, fontWeight: 600, padding: "10px 0 0", cursor: "pointer" }}
+          >
+            ⚠ Signaler un problème avec cette course
+          </button>
+        )}
       </div>
       <div className="ticket__perforation" />
       <div className="ticket__stub">
