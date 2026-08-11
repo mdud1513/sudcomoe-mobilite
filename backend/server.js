@@ -278,6 +278,25 @@ app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
   return versChauffeurDTO(rows[0]);
 });
 
+app.delete("/api/chauffeurs/:chauffeurId", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+
+  const { rows: coursesRows } = await pool.query(
+    "SELECT COUNT(*)::int AS n FROM rides WHERE chauffeur_id = $1",
+    [req.params.chauffeurId]
+  );
+  if (coursesRows[0].n > 0) {
+    return reply.code(409).send({
+      erreur: `Impossible de supprimer ce chauffeur : ${coursesRows[0].n} course(s) sont rattachées à son historique. La suppression est réservée aux chauffeurs sans course associée.`,
+    });
+  }
+
+  const { rows } = await pool.query("DELETE FROM chauffeurs WHERE id = $1 RETURNING id", [req.params.chauffeurId]);
+  if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  return { supprime: true, chauffeurId: req.params.chauffeurId };
+});
+
 app.get("/api/chauffeurs/:chauffeurId/solde", async (req) => {
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(commission),0)::int AS commission_due, COUNT(*)::int AS nb

@@ -53,6 +53,8 @@ export const api = {
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
   validerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  supprimerChauffeur: (chauffeurId, token) =>
+    request(`/api/chauffeurs/${chauffeurId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
   adminExiste: () => request("/api/admin/existe"),
   adminBootstrap: (payload) => request("/api/admin/bootstrap", { method: "POST", body: JSON.stringify(payload) }),
   adminConnexion: (payload) => request("/api/admin/connexion", { method: "POST", body: JSON.stringify(payload) }),

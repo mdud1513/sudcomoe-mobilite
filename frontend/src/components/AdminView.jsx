@@ -76,6 +76,23 @@ export default function AdminView({ onToast }) {
     }
   }
 
+  async function supprimer(c) {
+    const confirmation = window.confirm(`Supprimer définitivement ${c.nom} (${c.badge}) ? Cette action est irréversible.`);
+    if (!confirmation) return;
+    try {
+      await api.supprimerChauffeur(c.id, session.token);
+      onToast(`${c.nom} a été supprimé.`);
+      charger();
+    } catch (err) {
+      if (err.message.includes("Authentification")) {
+        onToast("Session expirée, reconnectez-vous.");
+        deconnecter();
+        return;
+      }
+      onToast(err.message);
+    }
+  }
+
   async function envoyerInvitation(e) {
     e.preventDefault();
     if (!formInvite.nom || !formInvite.telephone || formInvite.motDePasse.length < 6) {
@@ -242,9 +259,14 @@ export default function AdminView({ onToast }) {
                 Statut : <span className="pill">{c.statut}</span> — vérifiez le diagnostic gaz et la signature
                 du contrat avant de valider.
               </p>
-              <button className="btn btn--primary" onClick={() => valider(c.id)}>
-                Valider et activer
-              </button>
+              <div className="btn-row">
+                <button className="btn btn--danger-outline" onClick={() => supprimer(c)}>
+                  Supprimer
+                </button>
+                <button className="btn btn--primary" onClick={() => valider(c.id)}>
+                  Valider et activer
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -255,12 +277,28 @@ export default function AdminView({ onToast }) {
       <div style={{ height: 8 }} />
       <div className="card">
         {actifs.map((c) => (
-          <div key={c.id} className="driver-badge">
-            <div className="driver-badge__avatar">{c.nom.split(" ").map((n) => n[0]).join("")}</div>
-            <div>
-              <div className="driver-badge__name">{c.nom} · {c.badge}</div>
-              <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
+          <div key={c.id} className="driver-badge" style={{ justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="driver-badge__avatar">{c.nom.split(" ").map((n) => n[0]).join("")}</div>
+              <div>
+                <div className="driver-badge__name">{c.nom} · {c.badge}</div>
+                <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
+              </div>
             </div>
+            <button
+              onClick={() => supprimer(c)}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "var(--color-danger)",
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "6px 8px",
+                flexShrink: 0,
+              }}
+            >
+              Supprimer
+            </button>
           </div>
         ))}
       </div>
