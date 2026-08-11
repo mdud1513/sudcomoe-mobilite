@@ -125,6 +125,8 @@ export async function initDb() {
   `);
 
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_arrive_le TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrivee_destination_le TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS derniere_relance_le TIMESTAMPTZ;`);
 
   // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");

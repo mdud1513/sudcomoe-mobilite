@@ -544,6 +544,8 @@ function versRideDTO(row, chauffeur) {
     historique: row.historique,
     tempsAttenteMinutes: row.temps_attente_minutes,
     chauffeurArriveLe: row.chauffeur_arrive_le,
+    arriveeDestinationLe: row.arrivee_destination_le,
+    derniereRelanceLe: row.derniere_relance_le,
     heureArriveeEstimee: row.heure_arrivee_estimee,
     ...(chauffeur ? { chauffeur: versChauffeurDTO(chauffeur) } : {}),
   };
@@ -764,6 +766,41 @@ app.post("/api/rides/:rideId/liberer", async (req, reply) => {
   return versRideDTO(rows[0]);
 });
 
+// Le chauffeur ne parvient pas à joindre/trouver le client : annule directement + signalement automatique
+app.post("/api/rides/:rideId/client-introuvable", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+
+  const { rows } = await pool.query(
+    `UPDATE rides
+     SET statut = 'annulee', historique = historique || $1::jsonb
+     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee'
+     RETURNING *`,
+    [
+      JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString(), note: "client introuvable" }]),
+      req.params.rideId,
+      chauffeur.id,
+    ]
+  );
+  if (!rows[0]) {
+    return reply.code(409).send({ erreur: "Cette course ne peut pas être annulée pour ce motif dans son état actuel." });
+  }
+
+  await pool.query(
+    `INSERT INTO signalements (id, ride_id, auteur, message) VALUES ($1,$2,'chauffeur',$3)`,
+    [id("sig"), req.params.rideId, `Client introuvable au point de prise en charge (${rows[0].zone_depart}).`]
+  );
+
+  notifierClientDeLaCourse(req.params.rideId, {
+    titre: "Course annulée",
+    corps: "Notre chauffeur n'a pas réussi à vous joindre. N'hésitez pas à refaire une demande.",
+    rideId: req.params.rideId,
+    role: "client",
+  }).catch(() => {});
+
+  return versRideDTO(rows[0]);
+});
+
 // Le chauffeur signale qu'il est arrivé au point de prise en charge du client
 app.post("/api/rides/:rideId/arrivee-client", async (req, reply) => {
   const chauffeur = await requireChauffeur(req, reply);
@@ -797,7 +834,7 @@ app.post("/api/rides/:rideId/arrivee-destination", async (req, reply) => {
   const chauffeur = await requireChauffeur(req, reply);
   if (!chauffeur) return;
   const { rows } = await pool.query(
-    `UPDATE rides SET statut = 'arrivee', historique = historique || $1::jsonb
+    `UPDATE rides SET statut = 'arrivee', arrivee_destination_le = now(), historique = historique || $1::jsonb
      WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee' RETURNING *`,
     [JSON.stringify([{ statut: "arrivee", horodatage: new Date().toISOString() }]), req.params.rideId, chauffeur.id]
   );
@@ -815,6 +852,43 @@ app.post("/api/rides/:rideId/arrivee-destination", async (req, reply) => {
     corps: "En attente de la confirmation du client.",
     rideId: req.params.rideId,
     role: "chauffeur",
+  }).catch(() => {});
+
+  return versRideDTO(rows[0], chauffeur);
+});
+
+const DELAI_MIN_ENTRE_RELANCES_MS = 60_000; // 1 minute entre deux relances, pour ne pas harceler le client
+
+// Le chauffeur relance le client qui met du temps à confirmer et payer, une fois arrivé à destination
+app.post("/api/rides/:rideId/relancer-client", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+
+  const { rows: existant } = await pool.query(
+    "SELECT * FROM rides WHERE id = $1 AND chauffeur_id = $2 AND statut = 'arrivee'",
+    [req.params.rideId, chauffeur.id]
+  );
+  const ride = existant[0];
+  if (!ride) return reply.code(409).send({ erreur: "Impossible de relancer le client pour cette course." });
+
+  if (ride.derniere_relance_le) {
+    const ecouleMs = Date.now() - new Date(ride.derniere_relance_le).getTime();
+    if (ecouleMs < DELAI_MIN_ENTRE_RELANCES_MS) {
+      const attenteSec = Math.ceil((DELAI_MIN_ENTRE_RELANCES_MS - ecouleMs) / 1000);
+      return reply.code(429).send({ erreur: `Merci de patienter encore ${attenteSec}s avant une nouvelle relance.` });
+    }
+  }
+
+  const { rows } = await pool.query(
+    "UPDATE rides SET derniere_relance_le = now() WHERE id = $1 RETURNING *",
+    [req.params.rideId]
+  );
+
+  notifierClientDeLaCourse(req.params.rideId, {
+    titre: "Rappel — course en attente",
+    corps: "Votre chauffeur attend toujours votre confirmation et le règlement de la course.",
+    rideId: req.params.rideId,
+    role: "client",
   }).catch(() => {});
 
   return versRideDTO(rows[0], chauffeur);

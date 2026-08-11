@@ -125,6 +125,18 @@ export default function DriverView({ zones, onToast }) {
     }
   }
 
+  async function clientIntrouvable(rideId) {
+    if (!window.confirm("Annuler cette course pour client introuvable ? Un signalement sera automatiquement enregistré.")) return;
+    try {
+      await api.clientIntrouvable(rideId, session.token);
+      setCourseActive(null);
+      onToast("Course annulée et signalement enregistré.");
+      rafraichir();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   async function marquerArriveeClient(rideId) {
     try {
       const updated = await api.arriveeClient(rideId, session.token);
@@ -140,6 +152,16 @@ export default function DriverView({ zones, onToast }) {
       const updated = await api.arriveeDestination(rideId, session.token);
       setCourseActive(updated);
       onToast("Le client a été notifié — en attente de confirmation et paiement.");
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function relancerClient(rideId) {
+    try {
+      const updated = await api.relancerClient(rideId, session.token);
+      setCourseActive(updated);
+      onToast("Client relancé.");
     } catch (err) {
       onToast(err.message);
     }
@@ -271,13 +293,34 @@ export default function DriverView({ zones, onToast }) {
               <button className="btn btn--primary" onClick={() => marquerArriveeDestination(courseActive.id)}>
                 🏁 Arrivé à destination
               </button>
+              <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => clientIntrouvable(courseActive.id)}>
+                🚫 Client introuvable — annuler
+              </button>
             </>
           )}
 
           {courseActive.statut === "arrivee" && (
-            <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
-              En attente de la confirmation et du paiement par le client.
-            </p>
+            <div style={{ marginTop: 12 }}>
+              <p className="card__hint" style={{ textAlign: "center" }}>
+                En attente de la confirmation et du paiement par le client
+                {courseActive.arriveeDestinationLe && (
+                  <> · depuis {Math.max(0, Math.round((Date.now() - new Date(courseActive.arriveeDestinationLe).getTime()) / 60000))} min</>
+                )}
+                .
+              </p>
+              <button
+                className="btn btn--outline"
+                onClick={() => relancerClient(courseActive.id)}
+                disabled={
+                  courseActive.derniereRelanceLe &&
+                  Date.now() - new Date(courseActive.derniereRelanceLe).getTime() < 60000
+                }
+              >
+                {courseActive.derniereRelanceLe && Date.now() - new Date(courseActive.derniereRelanceLe).getTime() < 60000
+                  ? `🔔 Relance envoyée — patientez ${Math.ceil((60000 - (Date.now() - new Date(courseActive.derniereRelanceLe).getTime())) / 1000)}s`
+                  : "🔔 Relancer le client"}
+              </button>
+            </div>
           )}
         </div>
       ) : (
