@@ -45,7 +45,12 @@ export const api = {
       `/api/devis?zoneDepart=${encodeURIComponent(zoneDepart)}&zoneArrivee=${encodeURIComponent(zoneArrivee)}&nombrePassagers=${nombrePassagers}&arrets=${encodeURIComponent(JSON.stringify((arrets || []).map((a) => ({ zone: a.zone }))))}`
     ),
   chauffeurs: () => request("/api/chauffeurs"),
-  creerCourse: (payload) => request("/api/rides", { method: "POST", body: JSON.stringify(payload) }),
+  creerCourse: (payload, token) =>
+    request("/api/rides", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
   course: (id) => request(`/api/rides/${id}`),
   coursesDemandees: (zone) => request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`),
   coursesChauffeur: (chauffeurId) => request(`/api/rides?chauffeurId=${chauffeurId}`),
@@ -70,4 +75,12 @@ export const api = {
     request("/api/admin/inviter", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
   adminStatistiques: (token) =>
     request("/api/admin/statistiques", { headers: { Authorization: `Bearer ${token}` } }),
+  inscriptionClient: (payload) => request("/api/clients/inscription", { method: "POST", body: JSON.stringify(payload) }),
+  connexionClient: (payload) => request("/api/clients/connexion", { method: "POST", body: JSON.stringify(payload) }),
+  clientMoi: (token) => request("/api/clients/moi", { headers: { Authorization: `Bearer ${token}` } }),
+  clientMesCourses: (token) => request("/api/clients/moi/courses", { headers: { Authorization: `Bearer ${token}` } }),
+  ajouterAdresseFavorite: (payload, token) =>
+    request("/api/clients/moi/adresses", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
+  supprimerAdresseFavorite: (index, token) =>
+    request(`/api/clients/moi/adresses/${index}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
 };

@@ -131,6 +131,30 @@ async function requireChauffeur(req, reply) {
   return rows[0];
 }
 
+async function requireClient(req, reply) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    reply.code(401).send({ erreur: "Connexion client requise." });
+    return null;
+  }
+  const { rows } = await pool.query("SELECT * FROM clients WHERE token = $1", [token]);
+  if (!rows[0]) {
+    reply.code(401).send({ erreur: "Connexion client requise." });
+    return null;
+  }
+  return rows[0];
+}
+
+// Authentification facultative : renvoie le client s'il est connecté, sinon null sans jamais bloquer la requête
+async function clientOptionnel(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return null;
+  const { rows } = await pool.query("SELECT * FROM clients WHERE token = $1", [token]);
+  return rows[0] || null;
+}
+
 app.get("/api/admin/existe", async () => {
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM admins");
   return { existe: rows[0].n > 0 };
@@ -239,6 +263,101 @@ app.get("/api/admin/statistiques", async (req, reply) => {
       partChauffeur: c.part_chauffeur,
     })),
   };
+});
+
+// ---------- Espace client ----------
+
+function versClientDTO(row) {
+  return {
+    id: row.id,
+    nom: row.nom,
+    telephone: row.telephone,
+    adressesFavorites: row.adresses_favorites,
+  };
+}
+
+app.post("/api/clients/inscription", async (req, reply) => {
+  const { nom, telephone, codePin } = req.body || {};
+  if (!nom || !telephone) {
+    return reply.code(400).send({ erreur: "nom et telephone sont requis." });
+  }
+  if (!/^\d{4}$/.test(codePin || "")) {
+    return reply.code(400).send({ erreur: "codePin doit être composé de 4 chiffres." });
+  }
+  const { rows: existant } = await pool.query("SELECT id FROM clients WHERE telephone = $1", [telephone]);
+  if (existant[0]) {
+    return reply.code(409).send({ erreur: "Un compte existe déjà avec ce numéro. Connectez-vous plutôt." });
+  }
+  const clientId = id("cli");
+  const token = id("tok");
+  const { rows } = await pool.query(
+    `INSERT INTO clients (id, nom, telephone, code_pin_hash, token) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [clientId, nom, telephone, hashMotDePasse(codePin), token]
+  );
+  return reply.code(201).send({ ...versClientDTO(rows[0]), token });
+});
+
+app.post("/api/clients/connexion", async (req, reply) => {
+  const { telephone, codePin } = req.body || {};
+  const { rows } = await pool.query("SELECT * FROM clients WHERE telephone = $1", [telephone]);
+  const client = rows[0];
+  if (!client || !verifierMotDePasse(codePin || "", client.code_pin_hash)) {
+    return reply.code(401).send({ erreur: "Numéro ou code incorrect." });
+  }
+  const token = id("tok");
+  const { rows: maj } = await pool.query("UPDATE clients SET token = $1 WHERE id = $2 RETURNING *", [token, client.id]);
+  return { ...versClientDTO(maj[0]), token };
+});
+
+app.get("/api/clients/moi", async (req, reply) => {
+  const client = await requireClient(req, reply);
+  if (!client) return;
+  return versClientDTO(client);
+});
+
+app.get("/api/clients/moi/courses", async (req, reply) => {
+  const client = await requireClient(req, reply);
+  if (!client) return;
+  const { rows } = await pool.query("SELECT * FROM rides WHERE client_id = $1 ORDER BY cree_le DESC LIMIT 50", [
+    client.id,
+  ]);
+  return rows.map((r) => versRideDTO(r));
+});
+
+app.post("/api/clients/moi/adresses", async (req, reply) => {
+  const client = await requireClient(req, reply);
+  if (!client) return;
+  const { label, zone, adresse, position } = req.body || {};
+  if (!label || !zone) {
+    return reply.code(400).send({ erreur: "label et zone sont requis." });
+  }
+  if (!ZONES.includes(zone)) {
+    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
+  }
+  const nouvelleAdresse = {
+    label: String(label).slice(0, 40),
+    zone,
+    adresse: typeof adresse === "string" ? adresse.slice(0, 150) : "",
+    position: position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null,
+  };
+  const favorites = [...client.adresses_favorites, nouvelleAdresse].slice(0, 5); // 5 adresses max
+  const { rows } = await pool.query("UPDATE clients SET adresses_favorites = $1 WHERE id = $2 RETURNING *", [
+    JSON.stringify(favorites),
+    client.id,
+  ]);
+  return versClientDTO(rows[0]);
+});
+
+app.delete("/api/clients/moi/adresses/:index", async (req, reply) => {
+  const client = await requireClient(req, reply);
+  if (!client) return;
+  const index = parseInt(req.params.index, 10);
+  const favorites = client.adresses_favorites.filter((_, i) => i !== index);
+  const { rows } = await pool.query("UPDATE clients SET adresses_favorites = $1 WHERE id = $2 RETURNING *", [
+    JSON.stringify(favorites),
+    client.id,
+  ]);
+  return versClientDTO(rows[0]);
 });
 
 // ---------- Référentiel ----------
@@ -402,6 +521,7 @@ function versRideDTO(row, chauffeur) {
     montant: row.montant,
     statut: row.statut,
     chauffeurId: row.chauffeur_id,
+    clientId: row.client_id,
     modePaiement: row.mode_paiement,
     commission: row.commission,
     partChauffeur: row.part_chauffeur,
@@ -453,6 +573,7 @@ app.post("/api/rides", async (req, reply) => {
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
   }
+  const clientConnecte = await clientOptionnel(req); // rattachement facultatif à un compte client
   const passagers = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
   const positionValide =
     position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
@@ -481,8 +602,8 @@ app.post("/api/rides", async (req, reply) => {
   const { rows } = await pool.query(
     `INSERT INTO rides
       (id, client_nom, client_telephone, zone_depart, zone_arrivee, adresse_arrivee, nombre_passagers,
-       position, arrets, distance_km, tarif_base, supplement_arrets, montant, statut, historique)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'demandee',$14)
+       position, arrets, distance_km, tarif_base, supplement_arrets, montant, statut, historique, client_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'demandee',$14,$15)
      RETURNING *`,
     [
       rideId,
@@ -499,6 +620,7 @@ app.post("/api/rides", async (req, reply) => {
       supplement.total,
       tarifBase + supplement.total,
       JSON.stringify(historique),
+      clientConnecte?.id || null,
     ]
   );
   return reply.code(201).send(versRideDTO(rows[0]));

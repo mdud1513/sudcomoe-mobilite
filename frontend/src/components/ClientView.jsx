@@ -1,14 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
+import ClientAuth from "./ClientAuth.jsx";
+import ClientHistory from "./ClientHistory.jsx";
+import MapPicker from "./MapPicker.jsx";
+
+const CLE_SESSION_CLIENT = "scm_client_session";
+
+// Centres approximatifs des zones, uniquement pour centrer la carte au départ (Samo = estimation)
+const CENTRE_ZONES = {
+  Yaou: { lat: 5.2344, lng: -3.6346 },
+  "Grand-Bassam": { lat: 5.2118, lng: -3.7388 },
+  Bonoua: { lat: 5.2725, lng: -3.5963 },
+  Samo: { lat: 5.29, lng: -3.61 },
+};
 
 export default function ClientView({ zones, onToast }) {
+  const [session, setSession] = useState(() => {
+    try {
+      const brut = localStorage.getItem(CLE_SESSION_CLIENT);
+      return brut ? JSON.parse(brut) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [afficherAuth, setAfficherAuth] = useState(false);
+  const [afficherHistorique, setAfficherHistorique] = useState(false);
   const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", adresseArrivee: "", nombrePassagers: 1 });
   const [position, setPosition] = useState(null); // { lat, lng } une fois localisé
   const [localisation, setLocalisation] = useState("inactif"); // inactif | en_cours | ok | refuse
   const [arrets, setArrets] = useState([]); // jusqu'à 3 points de collecte supplémentaires
   const [estimation, setEstimation] = useState(null);
   const [estimationEnCours, setEstimationEnCours] = useState(false);
+  const [carteOuverte, setCarteOuverte] = useState(null); // null | "principale" | index de l'arrêt
   const [course, setCourse] = useState(null);
   const [modePaiement, setModePaiement] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -70,6 +94,40 @@ export default function ClientView({ zones, onToast }) {
 
   const handleChange = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  function connecte(nouvelleSession) {
+    localStorage.setItem(CLE_SESSION_CLIENT, JSON.stringify(nouvelleSession));
+    setSession(nouvelleSession);
+    setAfficherAuth(false);
+    setForm((f) => ({ ...f, clientNom: nouvelleSession.nom, clientTelephone: nouvelleSession.telephone }));
+    onToast(`Bienvenue, ${nouvelleSession.nom}.`);
+  }
+
+  function deconnecter() {
+    localStorage.removeItem(CLE_SESSION_CLIENT);
+    setSession(null);
+  }
+
+  async function enregistrerAdresse() {
+    if (!form.zoneArrivee) return;
+    const label = window.prompt("Nom pour cette adresse (ex. Maison, Travail) :", "");
+    if (!label) return;
+    try {
+      const maj = await api.ajouterAdresseFavorite(
+        { label, zone: form.zoneArrivee, adresse: form.adresseArrivee, position: null },
+        session.token
+      );
+      setSession((s) => ({ ...s, adressesFavorites: maj.adressesFavorites }));
+      localStorage.setItem(CLE_SESSION_CLIENT, JSON.stringify({ ...session, adressesFavorites: maj.adressesFavorites }));
+      onToast("Adresse enregistrée.");
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  function utiliserAdresseFavorite(adresse) {
+    setForm((f) => ({ ...f, zoneArrivee: adresse.zone, adresseArrivee: adresse.adresse || "" }));
+  }
+
   const arretsZonesCle = arrets.map((a) => a.zone).join(",");
   useEffect(() => {
     if (!form.zoneDepart || !form.zoneArrivee) return;
@@ -127,11 +185,14 @@ export default function ClientView({ zones, onToast }) {
     }
     setLoading(true);
     try {
-      const created = await api.creerCourse({
-        ...form,
-        position,
-        arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, position: a.position })),
-      });
+      const created = await api.creerCourse(
+        {
+          ...form,
+          position,
+          arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, position: a.position })),
+        },
+        session?.token
+      );
       setCourse(created);
     } catch (err) {
       onToast(err.message);
@@ -166,6 +227,38 @@ export default function ClientView({ zones, onToast }) {
   function nouvelleCourse() {
     setCourse(null);
     setModePaiement(null);
+  }
+
+  if (afficherAuth) {
+    return <ClientAuth onToast={onToast} onConnecte={connecte} onFermer={() => setAfficherAuth(false)} />;
+  }
+
+  if (afficherHistorique) {
+    return <ClientHistory token={session.token} onFermer={() => setAfficherHistorique(false)} />;
+  }
+
+  if (carteOuverte !== null) {
+    const centre =
+      carteOuverte === "principale"
+        ? CENTRE_ZONES[form.zoneDepart] || CENTRE_ZONES.Yaou
+        : CENTRE_ZONES[arrets[carteOuverte]?.zone] || CENTRE_ZONES.Yaou;
+    return (
+      <MapPicker
+        centreInitial={centre}
+        onAnnuler={() => setCarteOuverte(null)}
+        onValider={(pos) => {
+          if (carteOuverte === "principale") {
+            setPosition(pos);
+            setLocalisation("ok");
+          } else {
+            majArret(carteOuverte, "position", pos);
+            majArret(carteOuverte, "localisation", "ok");
+          }
+          setCarteOuverte(null);
+          onToast("Position enregistrée.");
+        }}
+      />
+    );
   }
 
   if (course) {
@@ -218,9 +311,44 @@ export default function ClientView({ zones, onToast }) {
   }
 
   return (
-    <form className="card" onSubmit={handleSubmit}>
-      <p className="card__title">Réserver une course</p>
-      <p className="card__hint">Chauffeurs affiliés, vérifiés et badgés — Yaou, Bassam, Bonoua, Samo.</p>
+    <div>
+      <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 14 }}>
+        {session ? (
+          <>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>👤 {session.nom}</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setAfficherHistorique(true)}
+                style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12.5, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Mes courses
+              </button>
+              <button
+                onClick={deconnecter}
+                style={{ border: "none", background: "transparent", color: "var(--color-ink-soft)", fontSize: 12.5, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Déconnexion
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 13, color: "var(--color-ink-soft)" }}>Réservation sans compte</span>
+            <button
+              onClick={() => setAfficherAuth(true)}
+              style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12.5, fontWeight: 600, padding: "6px 8px" }}
+            >
+              Se connecter
+            </button>
+          </>
+        )}
+      </div>
+
+      <div style={{ height: 12 }} />
+
+      <form className="card" onSubmit={handleSubmit}>
+        <p className="card__title">Réserver une course</p>
+        <p className="card__hint">Chauffeurs affiliés, vérifiés et badgés — Yaou, Bassam, Bonoua, Samo.</p>
 
       <div className="field">
         <label htmlFor="clientNom">Votre nom</label>
@@ -258,6 +386,35 @@ export default function ClientView({ zones, onToast }) {
         />
       </div>
 
+      {session && session.adressesFavorites && session.adressesFavorites.length > 0 && (
+        <div className="field">
+          <label>Adresses favorites</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {session.adressesFavorites.map((a, i) => (
+              <button
+                key={i}
+                type="button"
+                className="pill"
+                style={{ border: "none", cursor: "pointer" }}
+                onClick={() => utiliserAdresseFavorite(a)}
+              >
+                📍 {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {session && form.zoneArrivee && (
+        <button
+          type="button"
+          onClick={enregistrerAdresse}
+          style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12.5, fontWeight: 600, padding: "0 0 14px", cursor: "pointer" }}
+        >
+          + Enregistrer cette adresse d'arrivée en favori
+        </button>
+      )}
+
       <div className="field" style={{ marginBottom: 0 }}>
         <label>Nombre de passagers</label>
         <div className="pay-choice" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
@@ -276,21 +433,24 @@ export default function ClientView({ zones, onToast }) {
 
       <div className="field" style={{ marginBottom: 0 }}>
         <label>Position précise (facultatif)</label>
-        <button
-          type="button"
-          className="btn btn--outline"
-          onClick={localiser}
-          disabled={localisation === "en_cours"}
-          style={{ marginTop: 2 }}
-        >
-          {localisation === "ok"
-            ? "📍 Position partagée — recommencer"
-            : localisation === "en_cours"
-            ? "Localisation…"
-            : localisation === "refuse"
-            ? "📍 Réessayer de partager ma position"
-            : "📍 Partager ma position"}
-        </button>
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn--outline"
+            onClick={localiser}
+            disabled={localisation === "en_cours"}
+            style={{ marginTop: 2 }}
+          >
+            {localisation === "ok"
+              ? "📍 Position partagée"
+              : localisation === "en_cours"
+              ? "Localisation…"
+              : "📍 Ma position actuelle"}
+          </button>
+          <button type="button" className="btn btn--outline" onClick={() => setCarteOuverte("principale")} style={{ marginTop: 2 }}>
+            🗺️ Choisir sur la carte
+          </button>
+        </div>
         <p className="card__hint" style={{ marginTop: 6, marginBottom: 0 }}>
           Aide le chauffeur à vous retrouver précisément, en plus de la zone choisie ci-dessus.
         </p>
@@ -305,11 +465,11 @@ export default function ClientView({ zones, onToast }) {
           {arrets.map((arret, i) => (
             <div key={i} className="card" style={{ background: "var(--color-primary-tint)", boxShadow: "none", padding: 14, marginBottom: 10 }}>
               <div className="field" style={{ marginBottom: 10 }}>
-                <label>Nom de la personne {i + 1}</label>
+                <label>Nom de la personne {i + 1} (facultatif)</label>
                 <input
                   value={arret.nom}
                   onChange={(e) => majArret(i, "nom", e.target.value)}
-                  placeholder="Ex. Aïcha"
+                  placeholder="Laisser vide si vous préférez"
                 />
               </div>
               <div className="field" style={{ marginBottom: 10 }}>
@@ -318,19 +478,29 @@ export default function ClientView({ zones, onToast }) {
                   {zones.map((z) => <option key={z} value={z}>{z}</option>)}
                 </select>
               </div>
-              <button
-                type="button"
-                className="btn btn--outline"
-                onClick={() => localiserArret(i)}
-                disabled={arret.localisation === "en_cours"}
-                style={{ padding: "10px 14px", fontSize: 13.5 }}
-              >
-                {arret.localisation === "ok"
-                  ? "📍 Position partagée — recommencer"
-                  : arret.localisation === "en_cours"
-                  ? "Localisation…"
-                  : "📍 Partager sa position (si vous êtes avec elle)"}
-              </button>
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => localiserArret(i)}
+                  disabled={arret.localisation === "en_cours"}
+                  style={{ padding: "10px 14px", fontSize: 13.5 }}
+                >
+                  {arret.localisation === "ok"
+                    ? "📍 Position partagée"
+                    : arret.localisation === "en_cours"
+                    ? "Localisation…"
+                    : "📍 Je suis avec elle"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => setCarteOuverte(i)}
+                  style={{ padding: "10px 14px", fontSize: 13.5 }}
+                >
+                  🗺️ Sur la carte
+                </button>
+              </div>
             </div>
           ))}
         </>
@@ -360,6 +530,7 @@ export default function ClientView({ zones, onToast }) {
       <button className="btn btn--accent" type="submit" disabled={loading}>
         {loading ? "Envoi de la demande…" : "Demander une course"}
       </button>
-    </form>
+      </form>
+    </div>
   );
 }

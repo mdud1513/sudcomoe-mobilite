@@ -85,6 +85,20 @@ export async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      nom TEXT NOT NULL,
+      telephone TEXT UNIQUE NOT NULL,
+      code_pin_hash TEXT NOT NULL,
+      token TEXT,
+      adresses_favorites JSONB NOT NULL DEFAULT '[]',
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS client_id TEXT REFERENCES clients(id);`);
+
   // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
   if (rows[0].n === 0) {
