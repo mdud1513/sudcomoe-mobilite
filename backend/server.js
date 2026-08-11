@@ -44,9 +44,11 @@ function arrondir50(valeur) {
   return Math.round(valeur / 50) * 50;
 }
 
+const DISTANCE_LOCALE_KM = 2; // estimation moyenne pour un trajet intra-zone (pas de centres distincts)
+
 function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
-  const distance = zoneDepart === zoneArrivee ? 1 + Math.random() * 3 : distanceKm(zoneDepart, zoneArrivee);
+  const distance = zoneDepart === zoneArrivee ? DISTANCE_LOCALE_KM : distanceKm(zoneDepart, zoneArrivee);
   const montant = arrondir50(Math.max(TARIF_MINIMUM, distance * PRIX_PAR_KM) * facteurPassagers(n));
   return { montant, distanceKm: Math.round(distance * 10) / 10 };
 }
@@ -101,6 +103,21 @@ async function requireAdmin(req, reply) {
   const { rows } = await pool.query("SELECT * FROM admins WHERE token = $1", [token]);
   if (!rows[0]) {
     reply.code(401).send({ erreur: "Authentification admin requise." });
+    return null;
+  }
+  return rows[0];
+}
+
+async function requireChauffeur(req, reply) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    reply.code(401).send({ erreur: "Connexion chauffeur requise." });
+    return null;
+  }
+  const { rows } = await pool.query("SELECT * FROM chauffeurs WHERE token = $1", [token]);
+  if (!rows[0]) {
+    reply.code(401).send({ erreur: "Connexion chauffeur requise." });
     return null;
   }
   return rows[0];
@@ -245,9 +262,12 @@ app.get("/api/chauffeurs", async () => {
 });
 
 app.post("/api/chauffeurs", async (req, reply) => {
-  const { nom, telephone, zone, immatriculation } = req.body || {};
+  const { nom, telephone, zone, immatriculation, codePin } = req.body || {};
   if (!nom || !telephone || !zone || !immatriculation) {
     return reply.code(400).send({ erreur: "nom, telephone, zone et immatriculation sont requis." });
+  }
+  if (!/^\d{4}$/.test(codePin || "")) {
+    return reply.code(400).send({ erreur: "codePin doit être composé de 4 chiffres." });
   }
   if (!ZONES.includes(zone)) {
     return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
@@ -259,12 +279,34 @@ app.post("/api/chauffeurs", async (req, reply) => {
   const { rows: compte } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
   const badge = `SCM-${String(compte[0].n + 1).padStart(3, "0")}`;
   const chauffeurId = id("u");
+  const token = id("tok");
   const { rows } = await pool.query(
-    `INSERT INTO chauffeurs (id, nom, telephone, zone, statut, badge, immatriculation, kit_gpl, dernier_controle)
-     VALUES ($1,$2,$3,$4,'en attente de validation',$5,$6,'à diagnostiquer',NULL) RETURNING *`,
-    [chauffeurId, nom, telephone, zone, badge, immatriculation]
+    `INSERT INTO chauffeurs (id, nom, telephone, zone, statut, badge, immatriculation, kit_gpl, dernier_controle, code_pin_hash, token)
+     VALUES ($1,$2,$3,$4,'en attente de validation',$5,$6,'à diagnostiquer',NULL,$7,$8) RETURNING *`,
+    [chauffeurId, nom, telephone, zone, badge, immatriculation, hashMotDePasse(codePin), token]
   );
-  return reply.code(201).send(versChauffeurDTO(rows[0]));
+  return reply.code(201).send({ ...versChauffeurDTO(rows[0]), token });
+});
+
+app.post("/api/chauffeurs/connexion", async (req, reply) => {
+  const { telephone, codePin } = req.body || {};
+  const { rows } = await pool.query("SELECT * FROM chauffeurs WHERE telephone = $1", [telephone]);
+  const chauffeur = rows[0];
+  if (!chauffeur || !chauffeur.code_pin_hash || !verifierMotDePasse(codePin || "", chauffeur.code_pin_hash)) {
+    return reply.code(401).send({ erreur: "Numéro ou code incorrect." });
+  }
+  const token = id("tok");
+  const { rows: maj } = await pool.query("UPDATE chauffeurs SET token = $1 WHERE id = $2 RETURNING *", [
+    token,
+    chauffeur.id,
+  ]);
+  return { ...versChauffeurDTO(maj[0]), token };
+});
+
+app.get("/api/chauffeurs/moi", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  return versChauffeurDTO(chauffeur);
 });
 
 app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
@@ -297,7 +339,12 @@ app.delete("/api/chauffeurs/:chauffeurId", async (req, reply) => {
   return { supprime: true, chauffeurId: req.params.chauffeurId };
 });
 
-app.get("/api/chauffeurs/:chauffeurId/solde", async (req) => {
+app.get("/api/chauffeurs/:chauffeurId/solde", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  if (chauffeur.id !== req.params.chauffeurId) {
+    return reply.code(403).send({ erreur: "Vous ne pouvez consulter que votre propre solde." });
+  }
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(commission),0)::int AS commission_due, COUNT(*)::int AS nb
      FROM rides WHERE chauffeur_id = $1 AND statut = 'terminee' AND mode_paiement = 'especes'`,
@@ -306,7 +353,12 @@ app.get("/api/chauffeurs/:chauffeurId/solde", async (req) => {
   return { chauffeurId: req.params.chauffeurId, commissionDueEspeces: rows[0].commission_due, nbCourses: rows[0].nb };
 });
 
-app.get("/api/chauffeurs/:chauffeurId/gains", async (req) => {
+app.get("/api/chauffeurs/:chauffeurId/gains", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  if (chauffeur.id !== req.params.chauffeurId) {
+    return reply.code(403).send({ erreur: "Vous ne pouvez consulter que vos propres gains." });
+  }
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS nb, COALESCE(SUM(montant),0)::int AS ca,
             COALESCE(SUM(part_chauffeur),0)::int AS gains, COALESCE(SUM(commission),0)::int AS commission
@@ -350,6 +402,40 @@ function versRideDTO(row, chauffeur) {
     ...(chauffeur ? { chauffeur: versChauffeurDTO(chauffeur) } : {}),
   };
 }
+
+// Estimation du prix avant de valider la demande — ne crée aucune course
+app.get("/api/devis", async (req, reply) => {
+  const { zoneDepart, zoneArrivee, nombrePassagers, arrets } = req.query;
+  if (!zoneDepart || !zoneArrivee) {
+    return reply.code(400).send({ erreur: "zoneDepart et zoneArrivee sont requis." });
+  }
+  if (!ZONES.includes(zoneDepart) || !ZONES.includes(zoneArrivee)) {
+    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
+  }
+
+  let arretsZones = [];
+  if (arrets) {
+    try {
+      const parse = JSON.parse(arrets);
+      if (Array.isArray(parse)) {
+        arretsZones = parse.filter((a) => a && ZONES.includes(a.zone)).slice(0, 3);
+      }
+    } catch {
+      // arrets mal formé : ignoré, l'estimation se fait sans les arrêts
+    }
+  }
+
+  const { montant: tarifBase, distanceKm: distanceTrajet } = tarif(zoneDepart, zoneArrivee, nombrePassagers);
+  const supplement = supplementArrets(zoneDepart, zoneArrivee, arretsZones);
+
+  return {
+    distanceKm: distanceTrajet,
+    tarifBase,
+    supplementArrets: supplement.total,
+    montant: tarifBase + supplement.total,
+    detailArrets: supplement.details,
+  };
+});
 
 app.post("/api/rides", async (req, reply) => {
   const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, nombrePassagers, position, arrets } =
@@ -448,10 +534,8 @@ app.get("/api/rides", async (req) => {
 });
 
 app.post("/api/rides/:rideId/accepter", async (req, reply) => {
-  const { chauffeurId } = req.body || {};
-  const { rows: cRows } = await pool.query("SELECT * FROM chauffeurs WHERE id = $1", [chauffeurId]);
-  const chauffeur = cRows[0];
-  if (!chauffeur) return reply.code(400).send({ erreur: "Chauffeur inconnu." });
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
   if (chauffeur.statut !== "actif") {
     return reply
       .code(403)
@@ -465,7 +549,7 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
          historique = historique || $2::jsonb
      WHERE id = $3 AND statut = 'demandee'
      RETURNING *`,
-    [chauffeurId, JSON.stringify([{ statut: "confirmee", horodatage: new Date().toISOString() }]), req.params.rideId]
+    [chauffeur.id, JSON.stringify([{ statut: "confirmee", horodatage: new Date().toISOString() }]), req.params.rideId]
   );
   if (!rows[0]) {
     const { rows: check } = await pool.query("SELECT id FROM rides WHERE id = $1", [req.params.rideId]);

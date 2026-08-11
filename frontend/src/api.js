@@ -40,17 +40,25 @@ async function request(path, options = {}, tentative = 0) {
 
 export const api = {
   zones: () => request("/api/zones"),
+  devis: ({ zoneDepart, zoneArrivee, nombrePassagers, arrets }) =>
+    request(
+      `/api/devis?zoneDepart=${encodeURIComponent(zoneDepart)}&zoneArrivee=${encodeURIComponent(zoneArrivee)}&nombrePassagers=${nombrePassagers}&arrets=${encodeURIComponent(JSON.stringify((arrets || []).map((a) => ({ zone: a.zone }))))}`
+    ),
   chauffeurs: () => request("/api/chauffeurs"),
   creerCourse: (payload) => request("/api/rides", { method: "POST", body: JSON.stringify(payload) }),
   course: (id) => request(`/api/rides/${id}`),
   coursesDemandees: (zone) => request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`),
   coursesChauffeur: (chauffeurId) => request(`/api/rides?chauffeurId=${chauffeurId}`),
-  accepter: (id, chauffeurId) => request(`/api/rides/${id}/accepter`, { method: "POST", body: JSON.stringify({ chauffeurId }) }),
+  accepter: (id, token) => request(`/api/rides/${id}/accepter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
-  solde: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/solde`),
-  gains: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/gains`),
+  solde: (chauffeurId, token) =>
+    request(`/api/chauffeurs/${chauffeurId}/solde`, { headers: { Authorization: `Bearer ${token}` } }),
+  gains: (chauffeurId, token) =>
+    request(`/api/chauffeurs/${chauffeurId}/gains`, { headers: { Authorization: `Bearer ${token}` } }),
+  moi: (token) => request("/api/chauffeurs/moi", { headers: { Authorization: `Bearer ${token}` } }),
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
+  connexionChauffeur: (payload) => request("/api/chauffeurs/connexion", { method: "POST", body: JSON.stringify(payload) }),
   validerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   supprimerChauffeur: (chauffeurId, token) =>

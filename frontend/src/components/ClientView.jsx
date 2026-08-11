@@ -7,6 +7,8 @@ export default function ClientView({ zones, onToast }) {
   const [position, setPosition] = useState(null); // { lat, lng } une fois localisé
   const [localisation, setLocalisation] = useState("inactif"); // inactif | en_cours | ok | refuse
   const [arrets, setArrets] = useState([]); // jusqu'à 3 points de collecte supplémentaires
+  const [estimation, setEstimation] = useState(null);
+  const [estimationEnCours, setEstimationEnCours] = useState(false);
   const [course, setCourse] = useState(null);
   const [modePaiement, setModePaiement] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -67,6 +69,33 @@ export default function ClientView({ zones, onToast }) {
   }
 
   const handleChange = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const arretsZonesCle = arrets.map((a) => a.zone).join(",");
+  useEffect(() => {
+    if (!form.zoneDepart || !form.zoneArrivee) return;
+    let annule = false;
+    setEstimationEnCours(true);
+    const delai = setTimeout(async () => {
+      try {
+        const devis = await api.devis({
+          zoneDepart: form.zoneDepart,
+          zoneArrivee: form.zoneArrivee,
+          nombrePassagers: form.nombrePassagers,
+          arrets,
+        });
+        if (!annule) setEstimation(devis);
+      } catch {
+        if (!annule) setEstimation(null);
+      } finally {
+        if (!annule) setEstimationEnCours(false);
+      }
+    }, 300);
+    return () => {
+      annule = true;
+      clearTimeout(delai);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.zoneDepart, form.zoneArrivee, form.nombrePassagers, arretsZonesCle]);
 
   function localiser() {
     if (!navigator.geolocation) {
@@ -308,6 +337,26 @@ export default function ClientView({ zones, onToast }) {
       )}
 
       <div style={{ height: 16 }} />
+
+      {estimation && (
+        <div className="ticket__stub" style={{ background: "var(--color-primary-tint)", borderRadius: "var(--radius-md)", padding: "14px 18px", marginBottom: 14 }}>
+          <div>
+            <div className="ticket__amount-label">Estimation{estimationEnCours ? "…" : ""}</div>
+            <div className="ticket__amount" style={{ fontSize: 22, color: "var(--color-primary-deep)" }}>
+              {estimation.montant} FCFA
+            </div>
+            {estimation.supplementArrets > 0 && (
+              <div style={{ fontSize: 11, color: "var(--color-ink-soft)", marginTop: 2 }}>
+                dont {estimation.supplementArrets} FCFA de détour
+              </div>
+            )}
+          </div>
+          {typeof estimation.distanceKm === "number" && (
+            <div className="ticket__code">≈ {estimation.distanceKm} km</div>
+          )}
+        </div>
+      )}
+
       <button className="btn btn--accent" type="submit" disabled={loading}>
         {loading ? "Envoi de la demande…" : "Demander une course"}
       </button>

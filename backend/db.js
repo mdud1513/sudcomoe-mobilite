@@ -34,9 +34,15 @@ export async function initDb() {
       immatriculation TEXT,
       kit_gpl TEXT,
       dernier_controle TEXT,
+      code_pin_hash TEXT,
+      token TEXT,
       cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // Ajoute les colonnes si la table existait déjà avant cette mise à jour (migration douce, sans perte de données)
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS code_pin_hash TEXT;`);
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS token TEXT;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS rides (

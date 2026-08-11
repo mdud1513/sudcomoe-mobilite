@@ -16,7 +16,6 @@ export default function App() {
   const [peutVoirAdmin] = useState(accesAdminAutorise);
   const [role, setRole] = useState(() => (accesAdminAutorise() && new URLSearchParams(window.location.search).has("admin") ? "admin" : "client"));
   const [zones, setZones] = useState([]);
-  const [chauffeurs, setChauffeurs] = useState([]);
   const [toast, setToast] = useState(null);
   const [erreurApi, setErreurApi] = useState(false);
 
@@ -26,11 +25,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    Promise.all([api.zones(), api.chauffeurs()])
-      .then(([z, c]) => {
-        setZones(z);
-        setChauffeurs(c);
-      })
+    api
+      .zones()
+      .then(setZones)
       .catch(() => setErreurApi(true));
   }, []);
 
@@ -71,12 +68,7 @@ export default function App() {
           role === "client" ? (
             <ClientView zones={zones} onToast={showToast} />
           ) : role === "chauffeur" ? (
-            <DriverView
-              chauffeurs={chauffeurs}
-              zones={zones}
-              onToast={showToast}
-              onChauffeurAjoute={(nouveau) => setChauffeurs((prev) => [...prev, nouveau])}
-            />
+            <DriverView zones={zones} onToast={showToast} />
           ) : (
             <AdminView onToast={showToast} />
           )

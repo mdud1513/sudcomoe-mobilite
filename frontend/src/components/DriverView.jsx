@@ -2,11 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
 import DriverRegister from "./DriverRegister.jsx";
+import DriverLogin from "./DriverLogin.jsx";
 import { demanderPermissionNotification, notifierNouvelleCourse } from "../alertes.js";
 
-export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjoute }) {
+const CLE_SESSION = "scm_chauffeur_session";
+
+export default function DriverView({ zones, onToast }) {
+  const [session, setSession] = useState(() => {
+    try {
+      const brut = localStorage.getItem(CLE_SESSION);
+      return brut ? JSON.parse(brut) : null;
+    } catch {
+      return null;
+    }
+  });
   const [inscription, setInscription] = useState(false);
-  const [chauffeurId, setChauffeurId] = useState(chauffeurs[0]?.id || "");
+  const [chauffeur, setChauffeur] = useState(null);
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
   const [solde, setSolde] = useState(null);
@@ -19,7 +30,18 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
     alertesActivesRef.current = alertesActives;
   }, [alertesActives]);
 
-  const chauffeur = chauffeurs.find((c) => c.id === chauffeurId);
+  function connecte(nouvelleSession) {
+    localStorage.setItem(CLE_SESSION, JSON.stringify(nouvelleSession));
+    setSession(nouvelleSession);
+    setInscription(false);
+    onToast(`Bienvenue, ${nouvelleSession.nom}.`);
+  }
+
+  function deconnecter() {
+    localStorage.removeItem(CLE_SESSION);
+    setSession(null);
+    setChauffeur(null);
+  }
 
   async function activerAlertes() {
     const permission = await demanderPermissionNotification();
@@ -27,7 +49,7 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
       setAlertesActives(true);
       onToast("Alertes activées — vous serez notifié des nouvelles demandes.");
     } else if (permission === "unsupported") {
-      setAlertesActives(true); // le son fonctionne quand même sans l'API Notification
+      setAlertesActives(true);
       onToast("Alerte sonore activée (notifications visuelles non supportées sur cet appareil).");
     } else {
       onToast("Notifications refusées — vous pouvez les activer plus tard dans les réglages du navigateur.");
@@ -35,13 +57,16 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
   }
 
   async function rafraichir() {
-    if (!chauffeurId) return;
+    if (!session) return;
     try {
+      const moi = await api.moi(session.token);
+      setChauffeur(moi);
+
       const [enCours, mesCourses, mSolde, mGains] = await Promise.all([
-        api.coursesDemandees(), // toutes zones confondues : le chauffeur choisit librement
-        api.coursesChauffeur(chauffeurId),
-        api.solde(chauffeurId),
-        api.gains(chauffeurId),
+        api.coursesDemandees(),
+        api.coursesChauffeur(session.chauffeurId),
+        api.solde(session.chauffeurId, session.token),
+        api.gains(session.chauffeurId, session.token),
       ]);
 
       if (alertesActivesRef.current) {
@@ -58,20 +83,26 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
       setSolde(mSolde);
       setGains(mGains);
     } catch (err) {
+      if (err.message.includes("Connexion chauffeur")) {
+        onToast("Session expirée, reconnectez-vous.");
+        deconnecter();
+        return;
+      }
       onToast(err.message);
     }
   }
 
   useEffect(() => {
+    if (!session) return;
     rafraichir();
     const t = setInterval(rafraichir, 3000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chauffeurId]);
+  }, [session?.token]);
 
   async function accepter(rideId) {
     try {
-      const updated = await api.accepter(rideId, chauffeurId);
+      const updated = await api.accepter(rideId, session.token);
       setCourseActive(updated);
       onToast("Course acceptée. Rendez-vous au point de prise en charge.");
       rafraichir();
@@ -80,49 +111,41 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
     }
   }
 
-  if (inscription) {
+  if (!session || inscription) {
+    if (inscription) {
+      return (
+        <DriverRegister
+          zones={zones}
+          onToast={onToast}
+          onAnnuler={() => setInscription(false)}
+          onInscrit={(nouvelleSession) =>
+            connecte({ token: nouvelleSession.token, chauffeurId: nouvelleSession.id, nom: nouvelleSession.nom })
+          }
+        />
+      );
+    }
     return (
-      <DriverRegister
-        zones={zones}
+      <DriverLogin
         onToast={onToast}
-        onAnnuler={() => setInscription(false)}
-        onInscrit={(nouveau) => {
-          setInscription(false);
-          onChauffeurAjoute(nouveau);
-          setChauffeurId(nouveau.id);
-        }}
+        onSinscrire={() => setInscription(true)}
+        onConnecte={(s) => connecte({ token: s.token, chauffeurId: s.id, nom: s.nom })}
       />
     );
   }
 
   if (!chauffeur) {
-    return (
-      <div className="card">
-        <div className="empty-state">
-          <div className="empty-state__glyph">—</div>
-          Aucun chauffeur affilié enregistré.
-        </div>
-        <button className="btn btn--accent" style={{ marginTop: 12 }} onClick={() => setInscription(true)}>
-          Devenir chauffeur affilié
-        </button>
-      </div>
-    );
+    return <p className="card__hint">Chargement…</p>;
   }
 
   return (
     <div>
       <div className="card">
-        <p className="card__title" style={{ fontSize: 15 }}>Chauffeur connecté</p>
-        <div className="field" style={{ marginBottom: 12 }}>
-          <select value={chauffeurId} onChange={(e) => setChauffeurId(e.target.value)}>
-            {chauffeurs.map((c) => (
-              <option key={c.id} value={c.id}>{c.nom} — {c.zone} ({c.badge})</option>
-            ))}
-          </select>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <p className="card__title" style={{ fontSize: 15, marginBottom: 12 }}>Mon profil</p>
+          <button className="btn btn--outline" style={{ width: "auto", padding: "6px 12px", fontSize: 12.5 }} onClick={deconnecter}>
+            Déconnexion
+          </button>
         </div>
-        <button className="btn btn--outline" style={{ marginBottom: 12 }} onClick={() => setInscription(true)}>
-          + Nouveau chauffeur : s'inscrire
-        </button>
         <div className="driver-badge">
           <div className="driver-badge__avatar">{chauffeur.nom.split(" ").map((n) => n[0]).join("")}</div>
           <div>
