@@ -66,6 +66,7 @@ export async function initDb() {
       part_chauffeur INT,
       cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
       historique JSONB NOT NULL DEFAULT '[]',
+      chauffeurs_refuses JSONB NOT NULL DEFAULT '[]',
       temps_attente_minutes INT,
       heure_arrivee_estimee TIMESTAMPTZ
     );
@@ -73,6 +74,7 @@ export async function initDb() {
 
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS temps_attente_minutes INT;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS heure_arrivee_estimee TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeurs_refuses JSONB NOT NULL DEFAULT '[]';`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (

@@ -63,7 +63,7 @@ export default function DriverView({ zones, onToast }) {
       setChauffeur(moi);
 
       const [enCours, mesCourses, mSolde, mGains] = await Promise.all([
-        api.coursesDemandees(),
+        api.coursesDemandees(undefined, session.token),
         api.coursesChauffeur(session.chauffeurId),
         api.solde(session.chauffeurId, session.token),
         api.gains(session.chauffeurId, session.token),

@@ -52,7 +52,10 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }),
   course: (id) => request(`/api/rides/${id}`),
-  coursesDemandees: (zone) => request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`),
+  coursesDemandees: (zone, token) =>
+    request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
   coursesChauffeur: (chauffeurId) => request(`/api/rides?chauffeurId=${chauffeurId}`),
   accepter: (id, token) => request(`/api/rides/${id}/accepter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   liberer: (id, token) => request(`/api/rides/${id}/liberer`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),

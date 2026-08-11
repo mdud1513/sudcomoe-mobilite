@@ -155,6 +155,14 @@ async function clientOptionnel(req) {
   return rows[0] || null;
 }
 
+async function chauffeurOptionnel(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return null;
+  const { rows } = await pool.query("SELECT * FROM chauffeurs WHERE token = $1", [token]);
+  return rows[0] || null;
+}
+
 app.get("/api/admin/existe", async () => {
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM admins");
   return { existe: rows[0].n > 0 };
@@ -661,6 +669,14 @@ app.get("/api/rides", async (req) => {
     valeurs.push(chauffeurId);
     conditions.push(`chauffeur_id = $${valeurs.length}`);
   }
+
+  // Si un chauffeur est connecté, on lui masque les demandes qu'il a déjà libérées/refusées
+  const chauffeur = await chauffeurOptionnel(req);
+  if (chauffeur) {
+    valeurs.push(JSON.stringify([chauffeur.id]));
+    conditions.push(`NOT (chauffeurs_refuses @> $${valeurs.length}::jsonb)`);
+  }
+
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(`SELECT * FROM rides ${where} ORDER BY cree_le DESC`, valeurs);
   return rows.map((r) => versRideDTO(r));
@@ -708,13 +724,15 @@ app.post("/api/rides/:rideId/liberer", async (req, reply) => {
   const { rows } = await pool.query(
     `UPDATE rides
      SET statut = 'demandee', chauffeur_id = NULL, temps_attente_minutes = NULL, heure_arrivee_estimee = NULL,
-         historique = historique || $1::jsonb
+         historique = historique || $1::jsonb,
+         chauffeurs_refuses = chauffeurs_refuses || $4::jsonb
      WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee'
      RETURNING *`,
     [
       JSON.stringify([{ statut: "demandee", horodatage: new Date().toISOString(), note: "libérée par le chauffeur" }]),
       req.params.rideId,
       chauffeur.id,
+      JSON.stringify([chauffeur.id]),
     ]
   );
   if (!rows[0]) {
