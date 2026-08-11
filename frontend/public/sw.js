@@ -24,7 +24,7 @@ self.addEventListener("fetch", (e) => {
 
 // Reçoit une notification push même si l'appli n'est pas ouverte au premier plan
 self.addEventListener("push", (event) => {
-  let data = { titre: "Sud-Comoé Mobilité", corps: "Mise à jour de votre course.", rideId: null };
+  let data = { titre: "Sud-Comoé Mobilité", corps: "Mise à jour de votre course.", rideId: null, role: null };
   try {
     data = event.data.json();
   } catch {
@@ -36,20 +36,27 @@ self.addEventListener("push", (event) => {
       icon: "/icon-192.png",
       badge: "/icon-192.png",
       tag: data.rideId || undefined, // remplace la précédente notif de la même course plutôt que d'empiler
-      data: { rideId: data.rideId || null },
+      data: { rideId: data.rideId || null, role: data.role || null },
     })
   );
 });
 
-// Ramène l'utilisateur dans l'appli au clic sur la notification
+// Ramène l'utilisateur directement sur l'écran concerné par la notification (bon onglet, bonne course)
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const { rideId, role } = event.notification.data || {};
+  const params = new URLSearchParams();
+  if (role) params.set("role", role);
+  if (rideId) params.set("course", rideId);
+  const cible = `/${params.toString() ? `?${params.toString()}` : ""}`;
+
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
-      if (clientsArr.length > 0) {
-        return clientsArr[0].focus();
+      const existante = clientsArr[0];
+      if (existante) {
+        return existante.navigate(cible).then((c) => c.focus());
       }
-      return self.clients.openWindow("/");
+      return self.clients.openWindow(cible);
     })
   );
 });

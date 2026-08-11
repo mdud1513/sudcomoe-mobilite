@@ -645,6 +645,7 @@ app.post("/api/rides", async (req, reply) => {
     titre: "Nouvelle demande de course",
     corps: `${zoneDepart} → ${zoneArrivee} · ${rows[0].montant} FCFA`,
     rideId,
+    role: "chauffeur",
   }).catch(() => {});
 
   return reply.code(201).send(versRideDTO(rows[0]));
@@ -732,6 +733,7 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
     titre: "Chauffeur en route",
     corps: `${chauffeur.nom} arrive dans ≈${tempsAttente} min.`,
     rideId: req.params.rideId,
+    role: "client",
   }).catch(() => {});
 
   return versRideDTO(rowsFinal[0], chauffeur);
@@ -773,13 +775,19 @@ app.post("/api/rides/:rideId/arrivee-client", async (req, reply) => {
   );
   if (!rows[0]) return reply.code(409).send({ erreur: "Impossible de marquer l'arrivée pour cette course." });
 
-  const payload = {
+  const payloadClient = {
     titre: "Le chauffeur est arrivé",
     corps: `${chauffeur.nom} vous attend au point de prise en charge.`,
     rideId: req.params.rideId,
+    role: "client",
   };
-  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
-  notifierChauffeur(chauffeur.id, { titre: "Arrivée confirmée", corps: "Le client a été notifié.", rideId: req.params.rideId }).catch(() => {});
+  notifierClientDeLaCourse(req.params.rideId, payloadClient).catch(() => {});
+  notifierChauffeur(chauffeur.id, {
+    titre: "Arrivée confirmée",
+    corps: "Le client a été notifié.",
+    rideId: req.params.rideId,
+    role: "chauffeur",
+  }).catch(() => {});
 
   return versRideDTO(rows[0], chauffeur);
 });
@@ -795,13 +803,19 @@ app.post("/api/rides/:rideId/arrivee-destination", async (req, reply) => {
   );
   if (!rows[0]) return reply.code(409).send({ erreur: "Impossible de marquer l'arrivée à destination pour cette course." });
 
-  const payload = {
+  const payloadClient = {
     titre: "Arrivée à destination",
     corps: "Merci de confirmer et de régler la course.",
     rideId: req.params.rideId,
+    role: "client",
   };
-  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
-  notifierChauffeur(chauffeur.id, { titre: "Arrivée à destination confirmée", corps: "En attente de la confirmation du client.", rideId: req.params.rideId }).catch(() => {});
+  notifierClientDeLaCourse(req.params.rideId, payloadClient).catch(() => {});
+  notifierChauffeur(chauffeur.id, {
+    titre: "Arrivée à destination confirmée",
+    corps: "En attente de la confirmation du client.",
+    rideId: req.params.rideId,
+    role: "chauffeur",
+  }).catch(() => {});
 
   return versRideDTO(rows[0], chauffeur);
 });
@@ -836,14 +850,20 @@ app.post("/api/rides/:rideId/terminer", async (req, reply) => {
     ]
   );
 
-  const payload = {
+  const corpsCommun = `Paiement (${modePaiement === "especes" ? "espèces" : "Mobile Money"}) confirmé — ${ride.montant} FCFA.`;
+  notifierClientDeLaCourse(req.params.rideId, {
     titre: "Course terminée",
-    corps: `Paiement (${modePaiement === "especes" ? "espèces" : "Mobile Money"}) confirmé — ${ride.montant} FCFA.`,
+    corps: corpsCommun,
     rideId: req.params.rideId,
-  };
-  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
+    role: "client",
+  }).catch(() => {});
   if (ride.chauffeur_id) {
-    notifierChauffeur(ride.chauffeur_id, payload).catch(() => {});
+    notifierChauffeur(ride.chauffeur_id, {
+      titre: "Course terminée",
+      corps: corpsCommun,
+      rideId: req.params.rideId,
+      role: "chauffeur",
+    }).catch(() => {});
   }
 
   return versRideDTO(rows[0]);

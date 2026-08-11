@@ -12,9 +12,17 @@ function accesAdminAutorise() {
   return parametreUrl || sessionExistante;
 }
 
+function roleInitial() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("admin")) return "admin";
+  const role = params.get("role");
+  if (role === "client" || role === "chauffeur") return role;
+  return "client";
+}
+
 export default function App() {
   const [peutVoirAdmin] = useState(accesAdminAutorise);
-  const [role, setRole] = useState(() => (accesAdminAutorise() && new URLSearchParams(window.location.search).has("admin") ? "admin" : "client"));
+  const [role, setRole] = useState(roleInitial);
   const [zones, setZones] = useState([]);
   const [toast, setToast] = useState(null);
   const [erreurApi, setErreurApi] = useState(false);
@@ -66,7 +74,7 @@ export default function App() {
 
         {!erreurApi && zones.length > 0 && (
           role === "client" ? (
-            <ClientView zones={zones} onToast={showToast} />
+            <ClientView zones={zones} onToast={showToast} courseIdDepuisNotification={new URLSearchParams(window.location.search).get("course")} />
           ) : role === "chauffeur" ? (
             <DriverView zones={zones} onToast={showToast} />
           ) : (

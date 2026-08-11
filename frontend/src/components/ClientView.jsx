@@ -17,7 +17,7 @@ const CENTRE_ZONES = {
   Samo: { lat: 5.29, lng: -3.61 },
 };
 
-export default function ClientView({ zones, onToast }) {
+export default function ClientView({ zones, onToast, courseIdDepuisNotification }) {
   const [session, setSession] = useState(() => {
     try {
       const brut = localStorage.getItem(CLE_SESSION_CLIENT);
@@ -44,9 +44,10 @@ export default function ClientView({ zones, onToast }) {
     return () => clearInterval(pollRef.current);
   }, []);
 
-  // Reprendre le suivi d'une course déjà en cours si l'onglet a été fermé puis rouvert
+  // Reprendre le suivi d'une course : priorité à celle indiquée par une notification cliquée,
+  // sinon celle déjà en cours si l'onglet a été fermé puis rouvert
   useEffect(() => {
-    const rideIdSauve = localStorage.getItem(CLE_COURSE_EN_COURS);
+    const rideIdSauve = courseIdDepuisNotification || localStorage.getItem(CLE_COURSE_EN_COURS);
     if (!rideIdSauve) return;
     api
       .course(rideIdSauve)
