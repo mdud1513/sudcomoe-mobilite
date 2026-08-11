@@ -10,6 +10,7 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
   const [solde, setSolde] = useState(null);
+  const [gains, setGains] = useState(null);
   const [alertesActives, setAlertesActives] = useState(false);
   const alertesActivesRef = useRef(false);
   const idsConnusRef = useRef(new Set());
@@ -36,10 +37,11 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
   async function rafraichir() {
     if (!chauffeurId) return;
     try {
-      const [enCours, mesCourses, mSolde] = await Promise.all([
+      const [enCours, mesCourses, mSolde, mGains] = await Promise.all([
         api.coursesDemandees(), // toutes zones confondues : le chauffeur choisit librement
         api.coursesChauffeur(chauffeurId),
         api.solde(chauffeurId),
+        api.gains(chauffeurId),
       ]);
 
       if (alertesActivesRef.current) {
@@ -54,6 +56,7 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
       const active = mesCourses.find((r) => r.statut === "confirmee");
       setCourseActive(active || null);
       setSolde(mSolde);
+      setGains(mGains);
     } catch (err) {
       onToast(err.message);
     }
@@ -137,6 +140,31 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
           </p>
         )}
       </div>
+
+      {gains && gains.nbCourses > 0 && (
+        <>
+          <div style={{ height: 16 }} />
+          <div className="card">
+            <p className="card__title" style={{ fontSize: 15 }}>Mes gains</p>
+            <p className="card__hint">{gains.nbCourses} course{gains.nbCourses > 1 ? "s" : ""} terminée{gains.nbCourses > 1 ? "s" : ""} au total</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div>
+                <div className="ticket__amount-label">Ce que j'ai gagné</div>
+                <div className="ticket__amount" style={{ fontSize: 24, color: "var(--color-success)" }}>
+                  {gains.gainsChauffeur} FCFA
+                </div>
+              </div>
+              <div>
+                <div className="ticket__amount-label">Commission Sud-Comoé Mobilité</div>
+                <div className="ticket__amount" style={{ fontSize: 24 }}>{gains.commissionPlateforme} FCFA</div>
+              </div>
+            </div>
+            <p className="card__hint" style={{ marginTop: 10, marginBottom: 0, fontSize: 11.5 }}>
+              Chiffre d'affaires total généré : {gains.chiffreAffaires} FCFA · commission 12% transparente sur chaque course
+            </p>
+          </div>
+        </>
+      )}
 
       {!alertesActives && (
         <>

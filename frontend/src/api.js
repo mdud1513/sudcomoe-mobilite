@@ -21,6 +21,7 @@ export const api = {
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
   solde: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/solde`),
+  gains: (chauffeurId) => request(`/api/chauffeurs/${chauffeurId}/gains`),
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
   validerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
@@ -29,4 +30,6 @@ export const api = {
   adminConnexion: (payload) => request("/api/admin/connexion", { method: "POST", body: JSON.stringify(payload) }),
   adminInviter: (payload, token) =>
     request("/api/admin/inviter", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
+  adminStatistiques: (token) =>
+    request("/api/admin/statistiques", { headers: { Authorization: `Bearer ${token}` } }),
 };

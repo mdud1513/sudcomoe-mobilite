@@ -98,6 +98,44 @@ app.get("/api/admin/liste", async (req, reply) => {
   return db.data.admins.map((a) => ({ nom: a.nom, telephone: a.telephone }));
 });
 
+// Statistiques globales : courses par chauffeur + commission totale de la plateforme
+app.get("/api/admin/statistiques", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  await db.read();
+
+  const coursesTerminees = db.data.rides.filter((r) => r.statut === "terminee");
+  const chauffeurs = db.data.users.filter((u) => u.role === "chauffeur");
+
+  const parChauffeur = chauffeurs.map((c) => {
+    const courses = coursesTerminees.filter((r) => r.chauffeurId === c.id);
+    const chiffreAffaires = courses.reduce((sum, r) => sum + (r.montant || 0), 0);
+    const commission = courses.reduce((sum, r) => sum + (r.commission || 0), 0);
+    const partChauffeur = courses.reduce((sum, r) => sum + (r.partChauffeur || 0), 0);
+    return {
+      chauffeurId: c.id,
+      nom: c.nom,
+      badge: c.badge,
+      zone: c.zone,
+      nbCourses: courses.length,
+      chiffreAffaires,
+      commission,
+      partChauffeur,
+    };
+  });
+
+  const toutesCourses = {
+    nbCoursesTerminees: coursesTerminees.length,
+    nbCoursesTotal: db.data.rides.length,
+    nbCoursesAnnulees: db.data.rides.filter((r) => r.statut === "annulee").length,
+    nbCoursesEnCours: db.data.rides.filter((r) => ["demandee", "confirmee"].includes(r.statut)).length,
+    chiffreAffairesTotal: coursesTerminees.reduce((sum, r) => sum + (r.montant || 0), 0),
+    commissionTotale: coursesTerminees.reduce((sum, r) => sum + (r.commission || 0), 0),
+  };
+
+  return { global: toutesCourses, parChauffeur: parChauffeur.sort((a, b) => b.nbCourses - a.nbCourses) };
+});
+
 const FOURCHETTES_LOCALE = { 1: [500, 800], 2: [800, 1000], 3: [1000, 1200], 4: [1200, 1400] };
 const FOURCHETTES_INTER_ZONE = { 1: [800, 1400], 2: [1400, 1700], 3: [1700, 2000], 4: [2000, 2300] };
 
@@ -277,6 +315,19 @@ app.get("/api/chauffeurs/:chauffeurId/solde", async (req, reply) => {
   );
   const commissionDue = rides.reduce((sum, r) => sum + (r.commission || 0), 0);
   return { chauffeurId: req.params.chauffeurId, commissionDueEspeces: commissionDue, nbCourses: rides.length };
+});
+
+// Résumé des gains personnels du chauffeur : ce qu'il a gagné, ce que la plateforme a pris
+app.get("/api/chauffeurs/:chauffeurId/gains", async (req, reply) => {
+  await db.read();
+  const courses = db.data.rides.filter((r) => r.chauffeurId === req.params.chauffeurId && r.statut === "terminee");
+  return {
+    chauffeurId: req.params.chauffeurId,
+    nbCourses: courses.length,
+    chiffreAffaires: courses.reduce((sum, r) => sum + (r.montant || 0), 0),
+    gainsChauffeur: courses.reduce((sum, r) => sum + (r.partChauffeur || 0), 0),
+    commissionPlateforme: courses.reduce((sum, r) => sum + (r.commission || 0), 0),
+  };
 });
 
 // Validation d'un chauffeur par l'équipe (après diagnostic gaz + signature du contrat)

@@ -14,6 +14,7 @@ export default function AdminView({ onToast }) {
     }
   });
   const [chauffeurs, setChauffeurs] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [inviter, setInviter] = useState(false);
   const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
@@ -31,8 +32,9 @@ export default function AdminView({ onToast }) {
 
   async function charger() {
     try {
-      const liste = await api.chauffeurs();
+      const [liste, s] = await Promise.all([api.chauffeurs(), api.adminStatistiques(session.token)]);
       setChauffeurs(liste);
+      setStats(s);
     } catch (err) {
       onToast(err.message);
     } finally {
@@ -125,6 +127,81 @@ export default function AdminView({ onToast }) {
         <button className="btn btn--outline" onClick={() => setInviter(true)}>
           + Inviter un autre admin
         </button>
+      )}
+
+      {stats && (
+        <>
+          <div style={{ height: 20 }} />
+          <p className="section-label">Vue d'ensemble</p>
+          <div style={{ height: 8 }} />
+          <div className="card">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div>
+                <div className="ticket__amount-label">Commission totale perçue</div>
+                <div className="ticket__amount" style={{ fontSize: 26 }}>{stats.global.commissionTotale} FCFA</div>
+              </div>
+              <div>
+                <div className="ticket__amount-label">Chiffre d'affaires total</div>
+                <div className="ticket__amount" style={{ fontSize: 26 }}>{stats.global.chiffreAffairesTotal} FCFA</div>
+              </div>
+            </div>
+            <div style={{ height: 14 }} />
+            <p className="card__hint" style={{ marginBottom: 0 }}>
+              <span className="pill">{stats.global.nbCoursesTerminees} terminées</span>{" "}
+              <span className="pill">{stats.global.nbCoursesEnCours} en cours</span>{" "}
+              <span className="pill">{stats.global.nbCoursesAnnulees} annulées</span>{" "}
+              · {stats.global.nbCoursesTotal} demandes au total depuis le lancement
+            </p>
+          </div>
+
+          <div style={{ height: 16 }} />
+          <p className="section-label">Courses et commissions par chauffeur</p>
+          <div style={{ height: 8 }} />
+          {stats.parChauffeur.length === 0 ? (
+            <div className="card">
+              <div className="empty-state">
+                <div className="empty-state__glyph">—</div>
+                Aucune course terminée pour le moment.
+              </div>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              {stats.parChauffeur.map((c, i) => (
+                <div
+                  key={c.chauffeurId}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "14px 20px",
+                    borderTop: i > 0 ? "1px solid var(--color-line)" : "none",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{c.nom} · {c.badge}</div>
+                    <div className="card__hint" style={{ marginBottom: 0 }}>
+                      Zone {c.zone} · {c.nbCourses} course{c.nbCourses > 1 ? "s" : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 18 }}>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 15, color: "var(--color-success)" }}>
+                        {c.partChauffeur} FCFA
+                      </div>
+                      <div className="card__hint" style={{ marginBottom: 0, fontSize: 11 }}>chauffeur</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 15 }}>
+                        {c.commission} FCFA
+                      </div>
+                      <div className="card__hint" style={{ marginBottom: 0, fontSize: 11 }}>commission</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <div style={{ height: 20 }} />
