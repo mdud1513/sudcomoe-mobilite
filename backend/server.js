@@ -2,6 +2,13 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { pool, id, initDb } from "./db.js";
+import {
+  clePublique,
+  enregistrerAbonnement,
+  notifierChauffeursActifs,
+  notifierClientDeLaCourse,
+  notifierChauffeur,
+} from "./push.js";
 
 const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
@@ -536,6 +543,7 @@ function versRideDTO(row, chauffeur) {
     creeLe: row.cree_le,
     historique: row.historique,
     tempsAttenteMinutes: row.temps_attente_minutes,
+    chauffeurArriveLe: row.chauffeur_arrive_le,
     heureArriveeEstimee: row.heure_arrivee_estimee,
     ...(chauffeur ? { chauffeur: versChauffeurDTO(chauffeur) } : {}),
   };
@@ -632,6 +640,13 @@ app.post("/api/rides", async (req, reply) => {
       clientConnecte?.id || null,
     ]
   );
+
+  notifierChauffeursActifs({
+    titre: "Nouvelle demande de course",
+    corps: `${zoneDepart} → ${zoneArrivee} · ${rows[0].montant} FCFA`,
+    rideId,
+  }).catch(() => {});
+
   return reply.code(201).send(versRideDTO(rows[0]));
 });
 
@@ -713,6 +728,12 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
     [tempsAttente, heureArrivee.toISOString(), req.params.rideId]
   );
 
+  notifierClientDeLaCourse(req.params.rideId, {
+    titre: "Chauffeur en route",
+    corps: `${chauffeur.nom} arrive dans ≈${tempsAttente} min.`,
+    rideId: req.params.rideId,
+  }).catch(() => {});
+
   return versRideDTO(rowsFinal[0], chauffeur);
 });
 
@@ -741,6 +762,50 @@ app.post("/api/rides/:rideId/liberer", async (req, reply) => {
   return versRideDTO(rows[0]);
 });
 
+// Le chauffeur signale qu'il est arrivé au point de prise en charge du client
+app.post("/api/rides/:rideId/arrivee-client", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  const { rows } = await pool.query(
+    `UPDATE rides SET chauffeur_arrive_le = now(), historique = historique || $1::jsonb
+     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee' RETURNING *`,
+    [JSON.stringify([{ statut: "chauffeur_arrive", horodatage: new Date().toISOString() }]), req.params.rideId, chauffeur.id]
+  );
+  if (!rows[0]) return reply.code(409).send({ erreur: "Impossible de marquer l'arrivée pour cette course." });
+
+  const payload = {
+    titre: "Le chauffeur est arrivé",
+    corps: `${chauffeur.nom} vous attend au point de prise en charge.`,
+    rideId: req.params.rideId,
+  };
+  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
+  notifierChauffeur(chauffeur.id, { titre: "Arrivée confirmée", corps: "Le client a été notifié.", rideId: req.params.rideId }).catch(() => {});
+
+  return versRideDTO(rows[0], chauffeur);
+});
+
+// Le chauffeur signale être arrivé à destination — reste à confirmer/payer côté client
+app.post("/api/rides/:rideId/arrivee-destination", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  const { rows } = await pool.query(
+    `UPDATE rides SET statut = 'arrivee', historique = historique || $1::jsonb
+     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee' RETURNING *`,
+    [JSON.stringify([{ statut: "arrivee", horodatage: new Date().toISOString() }]), req.params.rideId, chauffeur.id]
+  );
+  if (!rows[0]) return reply.code(409).send({ erreur: "Impossible de marquer l'arrivée à destination pour cette course." });
+
+  const payload = {
+    titre: "Arrivée à destination",
+    corps: "Merci de confirmer et de régler la course.",
+    rideId: req.params.rideId,
+  };
+  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
+  notifierChauffeur(chauffeur.id, { titre: "Arrivée à destination confirmée", corps: "En attente de la confirmation du client.", rideId: req.params.rideId }).catch(() => {});
+
+  return versRideDTO(rows[0], chauffeur);
+});
+
 app.post("/api/rides/:rideId/terminer", async (req, reply) => {
   const { modePaiement } = req.body || {};
   if (!["mobile_money", "especes"].includes(modePaiement)) {
@@ -749,7 +814,7 @@ app.post("/api/rides/:rideId/terminer", async (req, reply) => {
   const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
   const ride = existant[0];
   if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
-  if (ride.statut !== "confirmee") {
+  if (!["confirmee", "arrivee"].includes(ride.statut)) {
     return reply.code(409).send({ erreur: "Cette course ne peut pas être terminée depuis son statut actuel." });
   }
 
@@ -770,6 +835,17 @@ app.post("/api/rides/:rideId/terminer", async (req, reply) => {
       req.params.rideId,
     ]
   );
+
+  const payload = {
+    titre: "Course terminée",
+    corps: `Paiement (${modePaiement === "especes" ? "espèces" : "Mobile Money"}) confirmé — ${ride.montant} FCFA.`,
+    rideId: req.params.rideId,
+  };
+  notifierClientDeLaCourse(req.params.rideId, payload).catch(() => {});
+  if (ride.chauffeur_id) {
+    notifierChauffeur(ride.chauffeur_id, payload).catch(() => {});
+  }
+
   return versRideDTO(rows[0]);
 });
 
@@ -828,6 +904,32 @@ app.post("/api/admin/signalements/:signalementId/traiter", async (req, reply) =>
   if (!demandeur) return;
   await pool.query("UPDATE signalements SET traite = true WHERE id = $1", [req.params.signalementId]);
   return { traite: true };
+});
+
+// ---------- Notifications push (fonctionnent même appli fermée) ----------
+
+app.get("/api/push/cle-publique", async () => ({ clePublique: clePublique() }));
+
+app.post("/api/push/abonner-chauffeur", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  const { subscription } = req.body || {};
+  if (!subscription?.endpoint || !subscription?.keys) {
+    return reply.code(400).send({ erreur: "subscription invalide." });
+  }
+  await enregistrerAbonnement({ chauffeurId: chauffeur.id, subscription });
+  return { abonne: true };
+});
+
+app.post("/api/push/abonner-course/:rideId", async (req, reply) => {
+  const { subscription } = req.body || {};
+  if (!subscription?.endpoint || !subscription?.keys) {
+    return reply.code(400).send({ erreur: "subscription invalide." });
+  }
+  const { rows } = await pool.query("SELECT id FROM rides WHERE id = $1", [req.params.rideId]);
+  if (!rows[0]) return reply.code(404).send({ erreur: "Course introuvable." });
+  await enregistrerAbonnement({ rideId: req.params.rideId, subscription });
+  return { abonne: true };
 });
 
 app.get("/api/health", async () => ({ ok: true }));

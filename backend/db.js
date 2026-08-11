@@ -112,6 +112,20 @@ export async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id TEXT PRIMARY KEY,
+      chauffeur_id TEXT REFERENCES chauffeurs(id),
+      ride_id TEXT REFERENCES rides(id),
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_arrive_le TIMESTAMPTZ;`);
+
   // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
   if (rows[0].n === 0) {

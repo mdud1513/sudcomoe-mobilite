@@ -4,6 +4,7 @@ import Ticket from "./Ticket.jsx";
 import DriverRegister from "./DriverRegister.jsx";
 import DriverLogin from "./DriverLogin.jsx";
 import { demanderPermissionNotification, notifierNouvelleCourse } from "../alertes.js";
+import { abonnerChauffeur } from "../push.js";
 
 const CLE_SESSION = "scm_chauffeur_session";
 
@@ -48,6 +49,7 @@ export default function DriverView({ zones, onToast }) {
     if (permission === "granted") {
       setAlertesActives(true);
       onToast("Alertes activées — vous serez notifié des nouvelles demandes.");
+      abonnerChauffeur(session.token).catch(() => {});
     } else if (permission === "unsupported") {
       setAlertesActives(true);
       onToast("Alerte sonore activée (notifications visuelles non supportées sur cet appareil).");
@@ -78,7 +80,7 @@ export default function DriverView({ zones, onToast }) {
       idsConnusRef.current = new Set(enCours.map((r) => r.id));
 
       setDemandes(enCours);
-      const active = mesCourses.find((r) => r.statut === "confirmee");
+      const active = mesCourses.find((r) => ["confirmee", "arrivee"].includes(r.statut));
       setCourseActive(active || null);
       setSolde(mSolde);
       setGains(mGains);
@@ -118,6 +120,26 @@ export default function DriverView({ zones, onToast }) {
       setCourseActive(null);
       onToast("Course libérée — elle est de nouveau disponible pour un autre chauffeur.");
       rafraichir();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function marquerArriveeClient(rideId) {
+    try {
+      const updated = await api.arriveeClient(rideId, session.token);
+      setCourseActive(updated);
+      onToast("Le client a été notifié de votre arrivée.");
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function marquerArriveeDestination(rideId) {
+    try {
+      const updated = await api.arriveeDestination(rideId, session.token);
+      setCourseActive(updated);
+      onToast("Le client a été notifié — en attente de confirmation et paiement.");
     } catch (err) {
       onToast(err.message);
     }
@@ -229,12 +251,34 @@ export default function DriverView({ zones, onToast }) {
             role="chauffeur"
             onToast={onToast}
           />
-          <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
-            En attente de la confirmation d'arrivée par le client.
-          </p>
-          <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => liberer(courseActive.id)}>
-            Renoncer à cette course
-          </button>
+
+          {courseActive.statut === "confirmee" && !courseActive.chauffeurArriveLe && (
+            <>
+              <button className="btn btn--primary" style={{ marginTop: 12 }} onClick={() => marquerArriveeClient(courseActive.id)}>
+                📍 Je suis arrivé chez le client
+              </button>
+              <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => liberer(courseActive.id)}>
+                Renoncer à cette course
+              </button>
+            </>
+          )}
+
+          {courseActive.statut === "confirmee" && courseActive.chauffeurArriveLe && (
+            <>
+              <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
+                Client notifié de votre arrivée. Une fois le trajet commencé, marquez l'arrivée à destination.
+              </p>
+              <button className="btn btn--primary" onClick={() => marquerArriveeDestination(courseActive.id)}>
+                🏁 Arrivé à destination
+              </button>
+            </>
+          )}
+
+          {courseActive.statut === "arrivee" && (
+            <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
+              En attente de la confirmation et du paiement par le client.
+            </p>
+          )}
         </div>
       ) : (
         <div style={{ marginTop: 16 }}>

@@ -4,6 +4,7 @@ import { api } from "../api.js";
 const STATUT_LABELS = {
   demandee: "En recherche",
   confirmee: "En cours",
+  arrivee: "Arrivé à destination",
   terminee: "Terminée",
   annulee: "Annulée",
 };
@@ -61,7 +62,7 @@ export default function ClientHistory({ token, onFermer, onSuivre }) {
                   {c.montant} FCFA
                 </div>
               </div>
-              {["demandee", "confirmee"].includes(c.statut) && onSuivre && (
+              {["demandee", "confirmee", "arrivee"].includes(c.statut) && onSuivre && (
                 <button
                   className="btn btn--outline"
                   style={{ marginTop: 10, padding: "8px 14px", fontSize: 12.5, width: "auto" }}

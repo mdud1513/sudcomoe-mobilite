@@ -4,6 +4,7 @@ import Ticket from "./Ticket.jsx";
 import ClientAuth from "./ClientAuth.jsx";
 import ClientHistory from "./ClientHistory.jsx";
 import MapPicker from "./MapPicker.jsx";
+import { abonnerCourse } from "../push.js";
 
 const CLE_SESSION_CLIENT = "scm_client_session";
 const CLE_COURSE_EN_COURS = "scm_course_en_cours";
@@ -50,7 +51,7 @@ export default function ClientView({ zones, onToast }) {
     api
       .course(rideIdSauve)
       .then((fresh) => {
-        if (["demandee", "confirmee"].includes(fresh.statut)) {
+        if (["demandee", "confirmee", "arrivee"].includes(fresh.statut)) {
           setCourse(fresh);
         } else {
           localStorage.removeItem(CLE_COURSE_EN_COURS);
@@ -61,7 +62,7 @@ export default function ClientView({ zones, onToast }) {
   }, []);
 
   useEffect(() => {
-    if (course?.id && ["demandee", "confirmee"].includes(course.statut)) {
+    if (course?.id && ["demandee", "confirmee", "arrivee"].includes(course.statut)) {
       localStorage.setItem(CLE_COURSE_EN_COURS, course.id);
     } else if (course?.id) {
       localStorage.removeItem(CLE_COURSE_EN_COURS);
@@ -220,6 +221,7 @@ export default function ClientView({ zones, onToast }) {
         session?.token
       );
       setCourse(created);
+      abonnerCourse(created.id).catch(() => {});
     } catch (err) {
       onToast(err.message);
     } finally {
@@ -317,9 +319,30 @@ export default function ClientView({ zones, onToast }) {
           </div>
         )}
 
-        {course.statut === "confirmee" && (
+        {course.statut === "confirmee" && !course.chauffeurArriveLe && (
+          <div style={{ marginTop: 16 }}>
+            <p className="card__hint" style={{ textAlign: "center" }}>
+              Votre chauffeur est en route vers vous.
+            </p>
+            <button className="btn btn--danger-outline" onClick={() => {
+              if (window.confirm("Annuler cette course ? Le chauffeur est peut-être déjà en route.")) handleAnnuler();
+            }}>
+              Annuler la course
+            </button>
+          </div>
+        )}
+
+        {course.statut === "confirmee" && course.chauffeurArriveLe && (
+          <div style={{ marginTop: 16 }}>
+            <p className="card__hint" style={{ textAlign: "center", fontWeight: 600, color: "var(--color-primary-deep)" }}>
+              🚗 Votre chauffeur est arrivé — il vous attend au point de prise en charge.
+            </p>
+          </div>
+        )}
+
+        {course.statut === "arrivee" && (
           <div className="card" style={{ marginTop: 16 }}>
-            <p className="card__title" style={{ fontSize: 15 }}>Confirmer la fin de course</p>
+            <p className="card__title" style={{ fontSize: 15 }}>Arrivé à destination — confirmer et payer</p>
             <p className="card__hint">Choisissez comment vous réglez avant de confirmer, conformément à la charte de service.</p>
             <div className="pay-choice">
               <button
@@ -337,18 +360,7 @@ export default function ClientView({ zones, onToast }) {
                 💵 Espèces
               </button>
             </div>
-            <button className="btn btn--primary" onClick={handleTerminer}>Confirmer l'arrivée</button>
-            <div style={{ height: 10 }} />
-            <button
-              className="btn btn--danger-outline"
-              onClick={() => {
-                if (window.confirm("Annuler cette course ? Le chauffeur est peut-être déjà en route.")) {
-                  handleAnnuler();
-                }
-              }}
-            >
-              Annuler la course
-            </button>
+            <button className="btn btn--primary" onClick={handleTerminer}>Confirmer et terminer</button>
           </div>
         )}
 

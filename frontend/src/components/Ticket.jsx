@@ -4,6 +4,7 @@ import { api } from "../api.js";
 const STATUT_LABELS = {
   demandee: "Recherche d'un chauffeur",
   confirmee: "Chauffeur en route",
+  arrivee: "Arrivé à destination",
   terminee: "Course terminée",
   annulee: "Course annulée",
 };
@@ -102,7 +103,7 @@ export default function Ticket({ course, children, contact, role, onToast }) {
         )}
         {children}
 
-        {contact && ["confirmee", "terminee"].includes(statut) && (
+        {contact && ["confirmee", "arrivee", "terminee"].includes(statut) && (
           <div className="btn-row" style={{ marginTop: 12 }}>
             <a href={lienAppel(contact.telephone)} className="btn btn--primary" style={{ textDecoration: "none", textAlign: "center" }}>
               📞 Appeler {contact.nom?.split(" ")[0] || ""}
@@ -119,7 +120,7 @@ export default function Ticket({ course, children, contact, role, onToast }) {
           </div>
         )}
 
-        {["confirmee", "terminee"].includes(statut) && (
+        {["confirmee", "arrivee", "terminee"].includes(statut) && (
           <button
             type="button"
             onClick={signaler}

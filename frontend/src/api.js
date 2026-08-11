@@ -85,6 +85,13 @@ export const api = {
     request("/api/admin/signalements", { headers: { Authorization: `Bearer ${token}` } }),
   traiterSignalement: (id, token) =>
     request(`/api/admin/signalements/${id}/traiter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  pushClePublique: () => request("/api/push/cle-publique"),
+  pushAbonnerChauffeur: (subscription, token) =>
+    request("/api/push/abonner-chauffeur", { method: "POST", body: JSON.stringify({ subscription }), headers: { Authorization: `Bearer ${token}` } }),
+  pushAbonnerCourse: (rideId, subscription) =>
+    request(`/api/push/abonner-course/${rideId}`, { method: "POST", body: JSON.stringify({ subscription }) }),
+  arriveeClient: (id, token) => request(`/api/rides/${id}/arrivee-client`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  arriveeDestination: (id, token) => request(`/api/rides/${id}/arrivee-destination`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   inscriptionClient: (payload) => request("/api/clients/inscription", { method: "POST", body: JSON.stringify(payload) }),
   connexionClient: (payload) => request("/api/clients/connexion", { method: "POST", body: JSON.stringify(payload) }),
   clientMoi: (token) => request("/api/clients/moi", { headers: { Authorization: `Bearer ${token}` } }),
