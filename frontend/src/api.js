@@ -5,10 +5,15 @@ function attendre(ms) {
 }
 
 async function request(path, options = {}, tentative = 0) {
+  const methodesAvecCorps = ["POST", "PUT", "PATCH"];
+  const methode = (options.method || "GET").toUpperCase();
+  const corps = options.body ?? (methodesAvecCorps.includes(methode) ? "{}" : undefined);
+
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...options,
+      body: corps,
       headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     });
   } catch {
