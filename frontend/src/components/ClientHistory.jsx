@@ -8,7 +8,7 @@ const STATUT_LABELS = {
   annulee: "Annulée",
 };
 
-export default function ClientHistory({ token, onFermer }) {
+export default function ClientHistory({ token, onFermer, onSuivre }) {
   const [courses, setCourses] = useState(null);
 
   useEffect(() => {
@@ -61,6 +61,15 @@ export default function ClientHistory({ token, onFermer }) {
                   {c.montant} FCFA
                 </div>
               </div>
+              {["demandee", "confirmee"].includes(c.statut) && onSuivre && (
+                <button
+                  className="btn btn--outline"
+                  style={{ marginTop: 10, padding: "8px 14px", fontSize: 12.5, width: "auto" }}
+                  onClick={() => onSuivre(c.id)}
+                >
+                  Suivre en direct
+                </button>
+              )}
             </div>
           ))}
         </div>

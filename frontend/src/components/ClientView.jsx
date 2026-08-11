@@ -6,6 +6,7 @@ import ClientHistory from "./ClientHistory.jsx";
 import MapPicker from "./MapPicker.jsx";
 
 const CLE_SESSION_CLIENT = "scm_client_session";
+const CLE_COURSE_EN_COURS = "scm_course_en_cours";
 
 // Centres approximatifs des zones, uniquement pour centrer la carte au départ (Samo = estimation)
 const CENTRE_ZONES = {
@@ -41,6 +42,31 @@ export default function ClientView({ zones, onToast }) {
   useEffect(() => {
     return () => clearInterval(pollRef.current);
   }, []);
+
+  // Reprendre le suivi d'une course déjà en cours si l'onglet a été fermé puis rouvert
+  useEffect(() => {
+    const rideIdSauve = localStorage.getItem(CLE_COURSE_EN_COURS);
+    if (!rideIdSauve) return;
+    api
+      .course(rideIdSauve)
+      .then((fresh) => {
+        if (["demandee", "confirmee"].includes(fresh.statut)) {
+          setCourse(fresh);
+        } else {
+          localStorage.removeItem(CLE_COURSE_EN_COURS);
+        }
+      })
+      .catch(() => localStorage.removeItem(CLE_COURSE_EN_COURS));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (course?.id && ["demandee", "confirmee"].includes(course.statut)) {
+      localStorage.setItem(CLE_COURSE_EN_COURS, course.id);
+    } else if (course?.id) {
+      localStorage.removeItem(CLE_COURSE_EN_COURS);
+    }
+  }, [course?.id, course?.statut]);
 
   useEffect(() => {
     if (!course || ["terminee", "annulee"].includes(course.statut)) {
@@ -234,7 +260,21 @@ export default function ClientView({ zones, onToast }) {
   }
 
   if (afficherHistorique) {
-    return <ClientHistory token={session.token} onFermer={() => setAfficherHistorique(false)} />;
+    return (
+      <ClientHistory
+        token={session.token}
+        onFermer={() => setAfficherHistorique(false)}
+        onSuivre={async (rideId) => {
+          try {
+            const fresh = await api.course(rideId);
+            setCourse(fresh);
+            setAfficherHistorique(false);
+          } catch (err) {
+            onToast(err.message);
+          }
+        }}
+      />
+    );
   }
 
   if (carteOuverte !== null) {
@@ -298,6 +338,17 @@ export default function ClientView({ zones, onToast }) {
               </button>
             </div>
             <button className="btn btn--primary" onClick={handleTerminer}>Confirmer l'arrivée</button>
+            <div style={{ height: 10 }} />
+            <button
+              className="btn btn--danger-outline"
+              onClick={() => {
+                if (window.confirm("Annuler cette course ? Le chauffeur est peut-être déjà en route.")) {
+                  handleAnnuler();
+                }
+              }}
+            >
+              Annuler la course
+            </button>
           </div>
         )}
 
