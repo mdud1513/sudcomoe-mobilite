@@ -222,7 +222,18 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
         session?.token
       );
       setCourse(created);
-      abonnerCourse(created.id).catch(() => {});
+      abonnerCourse(created.id)
+        .then((resultat) => {
+          if (!resultat.ok) {
+            const raisons = {
+              refuse: "Notifications refusées — vous ne recevrez pas d'alertes pour cette course.",
+              non_supporte: "Notifications non disponibles sur cet appareil/navigateur.",
+              erreur: "Impossible d'activer les notifications pour cette course.",
+            };
+            onToast(raisons[resultat.raison] || "Notifications non activées.");
+          }
+        })
+        .catch(() => onToast("Impossible d'activer les notifications pour cette course."));
     } catch (err) {
       onToast(err.message);
     } finally {

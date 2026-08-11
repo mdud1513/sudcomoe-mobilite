@@ -27,18 +27,28 @@ export async function enregistrerAbonnement({ chauffeurId, rideId, subscription 
      ON CONFLICT (endpoint) DO UPDATE SET chauffeur_id = $2, ride_id = $3, p256dh = $5, auth = $6`,
     [id("push"), chauffeurId || null, rideId || null, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth]
   );
+  console.log(`[push] Abonnement enregistré (chauffeurId=${chauffeurId || "n/a"}, rideId=${rideId || "n/a"}).`);
 }
 
 async function envoyerA(rows, payload) {
+  if (rows.length === 0) {
+    console.warn(`[push] Aucun abonnement trouvé pour la notification "${payload.titre}" (rideId=${payload.rideId || "n/a"}).`);
+    return;
+  }
   const texte = JSON.stringify(payload);
   await Promise.all(
     rows.map(async (r) => {
       const subscription = { endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth } };
       try {
         await webpush.sendNotification(subscription, texte);
+        console.log(`[push] Notification "${payload.titre}" envoyée avec succès à ${r.endpoint.slice(0, 60)}...`);
       } catch (err) {
+        console.error(
+          `[push] Échec d'envoi vers ${r.endpoint.slice(0, 60)}... — code ${err.statusCode || "?"} : ${err.body || err.message}`
+        );
         if (err.statusCode === 410 || err.statusCode === 404) {
           await pool.query("DELETE FROM push_subscriptions WHERE endpoint = $1", [r.endpoint]);
+          console.warn("[push] Abonnement expiré supprimé de la base.");
         }
       }
     })
