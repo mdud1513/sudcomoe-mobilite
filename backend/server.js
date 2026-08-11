@@ -45,6 +45,14 @@ function arrondir50(valeur) {
 }
 
 const DISTANCE_LOCALE_KM = 2; // estimation moyenne pour un trajet intra-zone (pas de centres distincts)
+const VITESSE_MOYENNE_KMH = 25; // moyenne prudente en zone locale (routes, arrêts, circulation)
+const TEMPS_PREPARATION_MIN = 3; // délai avant que le chauffeur ne prenne réellement la route
+
+function estimerTempsAttente(zoneChauffeur, zoneDepart) {
+  const distance = zoneChauffeur === zoneDepart ? DISTANCE_LOCALE_KM : distanceKm(zoneChauffeur, zoneDepart);
+  const minutes = Math.round((distance / VITESSE_MOYENNE_KMH) * 60) + TEMPS_PREPARATION_MIN;
+  return minutes;
+}
 
 function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
@@ -399,6 +407,8 @@ function versRideDTO(row, chauffeur) {
     partChauffeur: row.part_chauffeur,
     creeLe: row.cree_le,
     historique: row.historique,
+    tempsAttenteMinutes: row.temps_attente_minutes,
+    heureArriveeEstimee: row.heure_arrivee_estimee,
     ...(chauffeur ? { chauffeur: versChauffeurDTO(chauffeur) } : {}),
   };
 }
@@ -556,7 +566,15 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
     if (!check[0]) return reply.code(404).send({ erreur: "Course introuvable." });
     return reply.code(409).send({ erreur: "Cette course n'est plus disponible." });
   }
-  return versRideDTO(rows[0], chauffeur);
+
+  const tempsAttente = estimerTempsAttente(chauffeur.zone, rows[0].zone_depart);
+  const heureArrivee = new Date(Date.now() + tempsAttente * 60000);
+  const { rows: rowsFinal } = await pool.query(
+    `UPDATE rides SET temps_attente_minutes = $1, heure_arrivee_estimee = $2 WHERE id = $3 RETURNING *`,
+    [tempsAttente, heureArrivee.toISOString(), req.params.rideId]
+  );
+
+  return versRideDTO(rowsFinal[0], chauffeur);
 });
 
 app.post("/api/rides/:rideId/terminer", async (req, reply) => {

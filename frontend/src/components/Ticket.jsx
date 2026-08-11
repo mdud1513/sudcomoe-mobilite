@@ -18,6 +18,19 @@ export default function Ticket({ course, children }) {
           <span className="ticket__route-arrow">→</span>
           <span>{course.zoneArrivee}</span>
         </div>
+        {course.statut === "confirmee" && course.tempsAttenteMinutes != null && (
+          <div style={{ marginTop: 6, marginBottom: 2, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span className="pill" style={{ background: "var(--color-accent)", color: "#4A3410" }}>
+              ⏱ Arrivée estimée dans ~{course.tempsAttenteMinutes} min
+            </span>
+            {course.heureArriveeEstimee && (
+              <span style={{ fontSize: 12, color: "var(--color-ink-soft)" }}>
+                vers{" "}
+                {new Date(course.heureArriveeEstimee).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+        )}
         <div className="ticket__meta">
           {course.clientNom}
           {course.nombrePassagers ? ` · ${course.nombrePassagers} passager${course.nombrePassagers > 1 ? "s" : ""}` : ""}

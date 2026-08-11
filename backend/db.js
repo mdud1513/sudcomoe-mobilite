@@ -65,9 +65,14 @@ export async function initDb() {
       commission INT,
       part_chauffeur INT,
       cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
-      historique JSONB NOT NULL DEFAULT '[]'
+      historique JSONB NOT NULL DEFAULT '[]',
+      temps_attente_minutes INT,
+      heure_arrivee_estimee TIMESTAMPTZ
     );
   `);
+
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS temps_attente_minutes INT;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS heure_arrivee_estimee TIMESTAMPTZ;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (
