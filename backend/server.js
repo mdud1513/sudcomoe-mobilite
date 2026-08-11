@@ -700,6 +700,29 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
   return versRideDTO(rowsFinal[0], chauffeur);
 });
 
+// Le chauffeur renonce à une course déjà acceptée : elle repart dans le pool, disponible pour un autre chauffeur
+app.post("/api/rides/:rideId/liberer", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+
+  const { rows } = await pool.query(
+    `UPDATE rides
+     SET statut = 'demandee', chauffeur_id = NULL, temps_attente_minutes = NULL, heure_arrivee_estimee = NULL,
+         historique = historique || $1::jsonb
+     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee'
+     RETURNING *`,
+    [
+      JSON.stringify([{ statut: "demandee", horodatage: new Date().toISOString(), note: "libérée par le chauffeur" }]),
+      req.params.rideId,
+      chauffeur.id,
+    ]
+  );
+  if (!rows[0]) {
+    return reply.code(409).send({ erreur: "Cette course ne peut pas être libérée (elle ne vous est peut-être plus attribuée)." });
+  }
+  return versRideDTO(rows[0]);
+});
+
 app.post("/api/rides/:rideId/terminer", async (req, reply) => {
   const { modePaiement } = req.body || {};
   if (!["mobile_money", "especes"].includes(modePaiement)) {

@@ -55,6 +55,7 @@ export const api = {
   coursesDemandees: (zone) => request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`),
   coursesChauffeur: (chauffeurId) => request(`/api/rides?chauffeurId=${chauffeurId}`),
   accepter: (id, token) => request(`/api/rides/${id}/accepter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  liberer: (id, token) => request(`/api/rides/${id}/liberer`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
   signaler: (id, auteur, message) =>

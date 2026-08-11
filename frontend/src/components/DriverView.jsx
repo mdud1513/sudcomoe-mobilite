@@ -111,6 +111,18 @@ export default function DriverView({ zones, onToast }) {
     }
   }
 
+  async function liberer(rideId) {
+    if (!window.confirm("Renoncer à cette course ? Elle redeviendra disponible pour un autre chauffeur.")) return;
+    try {
+      await api.liberer(rideId, session.token);
+      setCourseActive(null);
+      onToast("Course libérée — elle est de nouveau disponible pour un autre chauffeur.");
+      rafraichir();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   if (!session || inscription) {
     if (inscription) {
       return (
@@ -220,6 +232,9 @@ export default function DriverView({ zones, onToast }) {
           <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
             En attente de la confirmation d'arrivée par le client.
           </p>
+          <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => liberer(courseActive.id)}>
+            Renoncer à cette course
+          </button>
         </div>
       ) : (
         <div style={{ marginTop: 16 }}>
