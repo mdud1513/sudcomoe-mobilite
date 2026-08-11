@@ -166,11 +166,13 @@ app.post("/api/chauffeurs", async (req, reply) => {
 
 // Client crée une demande de course
 app.post("/api/rides", async (req, reply) => {
-  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, nombrePassagers } = req.body || {};
+  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, nombrePassagers, position } = req.body || {};
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
   }
   const passagers = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
+  const positionValide =
+    position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
   await db.read();
   const ride = {
     id: id("ride"),
@@ -179,6 +181,7 @@ app.post("/api/rides", async (req, reply) => {
     zoneDepart,
     zoneArrivee,
     nombrePassagers: passagers,
+    position: positionValide, // { lat, lng } ou null si non partagée / refusée
     montant: tarif(zoneDepart, zoneArrivee, passagers),
     statut: "demandee", // demandee -> confirmee -> terminee | annulee
     chauffeurId: null,

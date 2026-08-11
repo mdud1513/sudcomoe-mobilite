@@ -23,6 +23,17 @@ export default function Ticket({ course, children }) {
           {course.nombrePassagers ? ` · ${course.nombrePassagers} passager${course.nombrePassagers > 1 ? "s" : ""}` : ""}
           {course.chauffeur ? ` · Chauffeur : ${course.chauffeur.nom} (${course.chauffeur.badge})` : ""}
         </div>
+        {course.position && (
+          <a
+            href={`https://www.google.com/maps?q=${course.position.lat},${course.position.lng}`}
+            target="_blank"
+            rel="noreferrer"
+            className="pill"
+            style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}
+          >
+            📍 Voir la position exacte sur la carte
+          </a>
+        )}
         {children}
       </div>
       <div className="ticket__perforation" />

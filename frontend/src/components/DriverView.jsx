@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
 import DriverRegister from "./DriverRegister.jsx";
+import { demanderPermissionNotification, notifierNouvelleCourse } from "../alertes.js";
 
 export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjoute }) {
   const [inscription, setInscription] = useState(false);
@@ -9,17 +10,46 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
   const [solde, setSolde] = useState(null);
+  const [alertesActives, setAlertesActives] = useState(false);
+  const alertesActivesRef = useRef(false);
+  const idsConnusRef = useRef(new Set());
+
+  useEffect(() => {
+    alertesActivesRef.current = alertesActives;
+  }, [alertesActives]);
 
   const chauffeur = chauffeurs.find((c) => c.id === chauffeurId);
+
+  async function activerAlertes() {
+    const permission = await demanderPermissionNotification();
+    if (permission === "granted") {
+      setAlertesActives(true);
+      onToast("Alertes activées — vous serez notifié des nouvelles demandes.");
+    } else if (permission === "unsupported") {
+      setAlertesActives(true); // le son fonctionne quand même sans l'API Notification
+      onToast("Alerte sonore activée (notifications visuelles non supportées sur cet appareil).");
+    } else {
+      onToast("Notifications refusées — vous pouvez les activer plus tard dans les réglages du navigateur.");
+    }
+  }
 
   async function rafraichir() {
     if (!chauffeurId) return;
     try {
       const [enCours, mesCourses, mSolde] = await Promise.all([
-        api.coursesDemandees(chauffeur?.zone),
+        api.coursesDemandees(), // toutes zones confondues : le chauffeur choisit librement
         api.coursesChauffeur(chauffeurId),
         api.solde(chauffeurId),
       ]);
+
+      if (alertesActivesRef.current) {
+        const nouvelles = enCours.filter((r) => !idsConnusRef.current.has(r.id));
+        if (idsConnusRef.current.size > 0) {
+          nouvelles.forEach((r) => notifierNouvelleCourse(r));
+        }
+      }
+      idsConnusRef.current = new Set(enCours.map((r) => r.id));
+
       setDemandes(enCours);
       const active = mesCourses.find((r) => r.statut === "confirmee");
       setCourseActive(active || null);
@@ -108,6 +138,15 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
         )}
       </div>
 
+      {!alertesActives && (
+        <>
+          <div style={{ height: 12 }} />
+          <button className="btn btn--outline" onClick={activerAlertes}>
+            🔔 Activer les alertes de nouvelle demande
+          </button>
+        </>
+      )}
+
       {chauffeur.statut !== "actif" ? (
         <div className="card" style={{ marginTop: 16 }}>
           <p className="card__title" style={{ fontSize: 15 }}>Inscription en attente de validation</p>
@@ -128,13 +167,13 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
         </div>
       ) : (
         <div style={{ marginTop: 16 }}>
-          <p className="section-label">Demandes disponibles — zone {chauffeur.zone}</p>
+          <p className="section-label">Demandes disponibles — toutes zones</p>
           <div style={{ height: 8 }} />
           {demandes.length === 0 ? (
             <div className="card">
               <div className="empty-state">
                 <div className="empty-state__glyph">—</div>
-                Aucune demande en attente dans votre zone pour le moment.
+                Aucune demande en attente pour le moment.
               </div>
             </div>
           ) : (
@@ -148,6 +187,18 @@ export default function DriverView({ chauffeurs, zones, onToast, onChauffeurAjou
                   </div>
                   <p className="card__hint" style={{ marginBottom: 12 }}>
                     {r.clientNom} · <span className="pill">{r.montant} FCFA</span>
+                    {r.position && (
+                      <>
+                        {" · "}
+                        <a
+                          href={`https://www.google.com/maps?q=${r.position.lat},${r.position.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          📍 Voir sur la carte
+                        </a>
+                      </>
+                    )}
                   </p>
                   <button className="btn btn--primary" onClick={() => accepter(r.id)}>
                     Accepter cette course

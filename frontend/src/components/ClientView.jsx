@@ -4,6 +4,8 @@ import Ticket from "./Ticket.jsx";
 
 export default function ClientView({ zones, onToast }) {
   const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", nombrePassagers: 1 });
+  const [position, setPosition] = useState(null); // { lat, lng } une fois localisé
+  const [localisation, setLocalisation] = useState("inactif"); // inactif | en_cours | ok | refuse
   const [course, setCourse] = useState(null);
   const [modePaiement, setModePaiement] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -31,6 +33,25 @@ export default function ClientView({ zones, onToast }) {
 
   const handleChange = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  function localiser() {
+    if (!navigator.geolocation) {
+      onToast("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setLocalisation("en_cours");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocalisation("ok");
+      },
+      () => {
+        setLocalisation("refuse");
+        onToast("Position non partagée — le chauffeur se basera uniquement sur la zone indiquée.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.clientNom || !form.clientTelephone) {
@@ -42,7 +63,7 @@ export default function ClientView({ zones, onToast }) {
     }
     setLoading(true);
     try {
-      const created = await api.creerCourse(form);
+      const created = await api.creerCourse({ ...form, position });
       setCourse(created);
     } catch (err) {
       onToast(err.message);
@@ -173,6 +194,28 @@ export default function ClientView({ zones, onToast }) {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="field" style={{ marginBottom: 0 }}>
+        <label>Position précise (facultatif)</label>
+        <button
+          type="button"
+          className="btn btn--outline"
+          onClick={localiser}
+          disabled={localisation === "en_cours"}
+          style={{ marginTop: 2 }}
+        >
+          {localisation === "ok"
+            ? "📍 Position partagée — recommencer"
+            : localisation === "en_cours"
+            ? "Localisation…"
+            : localisation === "refuse"
+            ? "📍 Réessayer de partager ma position"
+            : "📍 Partager ma position"}
+        </button>
+        <p className="card__hint" style={{ marginTop: 6, marginBottom: 0 }}>
+          Aide le chauffeur à vous retrouver précisément, en plus de la zone choisie ci-dessus.
+        </p>
       </div>
 
       <div style={{ height: 16 }} />
