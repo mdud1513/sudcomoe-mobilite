@@ -31,15 +31,26 @@ export default function AdminView({ onToast }) {
   }
 
   async function charger() {
-    try {
-      const [liste, s] = await Promise.all([api.chauffeurs(), api.adminStatistiques(session.token)]);
-      setChauffeurs(liste);
-      setStats(s);
-    } catch (err) {
-      onToast(err.message);
-    } finally {
-      setLoading(false);
+    const [resultatChauffeurs, resultatStats] = await Promise.allSettled([
+      api.chauffeurs(),
+      api.adminStatistiques(session.token),
+    ]);
+
+    if (resultatChauffeurs.status === "fulfilled") {
+      setChauffeurs(resultatChauffeurs.value);
+    } else {
+      onToast(resultatChauffeurs.reason.message);
     }
+
+    if (resultatStats.status === "fulfilled") {
+      setStats(resultatStats.value);
+    } else if (resultatStats.reason.message.includes("Authentification")) {
+      onToast("Session expirée — reconnectez-vous.");
+      deconnecter();
+      return;
+    }
+
+    setLoading(false);
   }
 
   useEffect(() => {

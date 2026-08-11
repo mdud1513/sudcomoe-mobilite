@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
-import { db, id } from "./db.js";
+import { pool, id, initDb } from "./db.js";
 
 const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
@@ -9,145 +9,19 @@ await app.register(cors, { origin: true });
 const ZONES = ["Yaou", "Grand-Bassam", "Bonoua", "Samo"];
 const COMMISSION_RATE = 0.12;
 
-function hashMotDePasse(motDePasse) {
-  const sel = randomBytes(16).toString("hex");
-  const hash = scryptSync(motDePasse, sel, 64).toString("hex");
-  return `${sel}:${hash}`;
-}
+// ---------- Tarification ----------
 
-function verifierMotDePasse(motDePasse, stocke) {
-  const [sel, hash] = stocke.split(":");
-  const hashEssai = scryptSync(motDePasse, sel, 64).toString("hex");
-  const a = Buffer.from(hash, "hex");
-  const b = Buffer.from(hashEssai, "hex");
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-async function requireAdmin(req, reply) {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  await db.read();
-  const admin = token ? db.data.admins.find((a) => a.token === token) : null;
-  if (!admin) {
-    reply.code(401).send({ erreur: "Authentification admin requise." });
-    return null;
-  }
-  return admin;
-}
-
-// ---------- Authentification admin ----------
-
-// Indique s'il faut créer le tout premier compte admin (aucun admin existant)
-app.get("/api/admin/existe", async () => {
-  await db.read();
-  return { existe: db.data.admins.length > 0 };
-});
-
-// Création du tout premier admin — accessible uniquement si aucun admin n'existe encore
-app.post("/api/admin/bootstrap", async (req, reply) => {
-  const { nom, telephone, motDePasse } = req.body || {};
-  await db.read();
-  if (db.data.admins.length > 0) {
-    return reply.code(409).send({ erreur: "Un compte admin existe déjà. Demandez une invitation." });
-  }
-  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
-    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
-  }
-  const token = id("tok");
-  const admin = { id: id("admin"), nom, telephone, motDePasseHash: hashMotDePasse(motDePasse), token };
-  db.data.admins.push(admin);
-  await db.write();
-  return reply.code(201).send({ nom: admin.nom, telephone: admin.telephone, token });
-});
-
-// Connexion d'un admin existant
-app.post("/api/admin/connexion", async (req, reply) => {
-  const { telephone, motDePasse } = req.body || {};
-  await db.read();
-  const admin = db.data.admins.find((a) => a.telephone === telephone);
-  if (!admin || !verifierMotDePasse(motDePasse || "", admin.motDePasseHash)) {
-    return reply.code(401).send({ erreur: "Numéro ou mot de passe incorrect." });
-  }
-  admin.token = id("tok"); // un seul token actif à la fois, suffisant pour le prototype
-  await db.write();
-  return { nom: admin.nom, telephone: admin.telephone, token: admin.token };
-});
-
-// Invitation d'un nouvel admin — nécessite d'être déjà connecté
-app.post("/api/admin/inviter", async (req, reply) => {
-  const demandeur = await requireAdmin(req, reply);
-  if (!demandeur) return;
-  const { nom, telephone, motDePasse } = req.body || {};
-  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
-    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
-  }
-  await db.read();
-  if (db.data.admins.some((a) => a.telephone === telephone)) {
-    return reply.code(409).send({ erreur: "Un admin existe déjà avec ce numéro." });
-  }
-  const admin = { id: id("admin"), nom, telephone, motDePasseHash: hashMotDePasse(motDePasse), token: null };
-  db.data.admins.push(admin);
-  await db.write();
-  return reply.code(201).send({ nom: admin.nom, telephone: admin.telephone });
-});
-
-app.get("/api/admin/liste", async (req, reply) => {
-  const demandeur = await requireAdmin(req, reply);
-  if (!demandeur) return;
-  await db.read();
-  return db.data.admins.map((a) => ({ nom: a.nom, telephone: a.telephone }));
-});
-
-// Statistiques globales : courses par chauffeur + commission totale de la plateforme
-app.get("/api/admin/statistiques", async (req, reply) => {
-  const demandeur = await requireAdmin(req, reply);
-  if (!demandeur) return;
-  await db.read();
-
-  const coursesTerminees = db.data.rides.filter((r) => r.statut === "terminee");
-  const chauffeurs = db.data.users.filter((u) => u.role === "chauffeur");
-
-  const parChauffeur = chauffeurs.map((c) => {
-    const courses = coursesTerminees.filter((r) => r.chauffeurId === c.id);
-    const chiffreAffaires = courses.reduce((sum, r) => sum + (r.montant || 0), 0);
-    const commission = courses.reduce((sum, r) => sum + (r.commission || 0), 0);
-    const partChauffeur = courses.reduce((sum, r) => sum + (r.partChauffeur || 0), 0);
-    return {
-      chauffeurId: c.id,
-      nom: c.nom,
-      badge: c.badge,
-      zone: c.zone,
-      nbCourses: courses.length,
-      chiffreAffaires,
-      commission,
-      partChauffeur,
-    };
-  });
-
-  const toutesCourses = {
-    nbCoursesTerminees: coursesTerminees.length,
-    nbCoursesTotal: db.data.rides.length,
-    nbCoursesAnnulees: db.data.rides.filter((r) => r.statut === "annulee").length,
-    nbCoursesEnCours: db.data.rides.filter((r) => ["demandee", "confirmee"].includes(r.statut)).length,
-    chiffreAffairesTotal: coursesTerminees.reduce((sum, r) => sum + (r.montant || 0), 0),
-    commissionTotale: coursesTerminees.reduce((sum, r) => sum + (r.commission || 0), 0),
-  };
-
-  return { global: toutesCourses, parChauffeur: parChauffeur.sort((a, b) => b.nbCourses - a.nbCourses) };
-});
-
-// Coordonnées approximatives des centres de zone (WGS84), pour calcul de distance à vol d'oiseau
 const ZONE_COORDS = {
   Yaou: { lat: 5.2344, lng: -3.6346 },
   "Grand-Bassam": { lat: 5.2118, lng: -3.7388 },
   Bonoua: { lat: 5.2725, lng: -3.5963 },
-  Samo: { lat: 5.2900, lng: -3.6100 }, // estimation approximative, à corriger si coordonnées précises disponibles
+  Samo: { lat: 5.29, lng: -3.61 }, // estimation approximative, à corriger si coordonnées précises disponibles
 };
 
 function distanceKm(zoneA, zoneB) {
   const a = ZONE_COORDS[zoneA];
   const b = ZONE_COORDS[zoneB];
-  if (!a || !b) return 8; // repli raisonnable si une zone est inconnue
+  if (!a || !b) return 8;
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
@@ -157,12 +31,13 @@ function distanceKm(zoneA, zoneB) {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-const PRIX_PAR_KM = 150; // FCFA/km, course principale
-const PRIX_PAR_KM_DETOUR = 80; // FCFA/km, point de collecte supplémentaire (trajet plus court en général)
-const TARIF_MINIMUM = 400; // plancher pour une très courte course
+const PRIX_PAR_KM = 150;
+const PRIX_PAR_KM_DETOUR = 80;
+const TARIF_MINIMUM = 400;
+const SEUIL_SUR_LE_CHEMIN_KM = 1.5;
 
 function facteurPassagers(n) {
-  return 1 + (n - 1) * 0.25; // 1 → x1, 2 → x1.25, 3 → x1.5, 4 → x1.75
+  return 1 + (n - 1) * 0.25;
 }
 
 function arrondir50(valeur) {
@@ -171,19 +46,13 @@ function arrondir50(valeur) {
 
 function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
-  // Trajet intra-zone : pas de centres de zone distincts, on estime une courte distance locale
   const distance = zoneDepart === zoneArrivee ? 1 + Math.random() * 3 : distanceKm(zoneDepart, zoneArrivee);
   const montant = arrondir50(Math.max(TARIF_MINIMUM, distance * PRIX_PAR_KM) * facteurPassagers(n));
   return { montant, distanceKm: Math.round(distance * 10) / 10 };
 }
 
-const SEUIL_SUR_LE_CHEMIN_KM = 1.5; // en dessous, le détour est jugé négligeable : pas de supplément
-
-// Kilomètres ajoutés par un crochet via zoneArret, comparé au trajet direct départ → arrivée
 function detourExtraKm(zoneDepart, zoneArrivee, zoneArret) {
   if (zoneDepart === zoneArrivee) {
-    // Trajet local : une collecte dans la même zone est considérée sur le chemin (pas de détour réel).
-    // Une collecte dans une autre zone impose un aller-retour complet avant de continuer.
     return zoneArret === zoneDepart ? 0 : 2 * distanceKm(zoneDepart, zoneArret);
   }
   const trajetDirect = distanceKm(zoneDepart, zoneArrivee);
@@ -206,20 +75,175 @@ function supplementArrets(zoneDepart, zoneArrivee, arrets) {
   return { total, details };
 }
 
-// ---------- Référentiel ----------
-app.get("/api/zones", async () => ZONES);
+// ---------- Authentification admin ----------
 
-app.get("/api/chauffeurs", async () => {
-  await db.read();
-  return db.data.users
-    .filter((u) => u.role === "chauffeur")
-    .map((u) => ({
-      ...u,
-      vehicule: db.data.vehicles.find((v) => v.chauffeurId === u.id) || null,
-    }));
+function hashMotDePasse(motDePasse) {
+  const sel = randomBytes(16).toString("hex");
+  const hash = scryptSync(motDePasse, sel, 64).toString("hex");
+  return `${sel}:${hash}`;
+}
+
+function verifierMotDePasse(motDePasse, stocke) {
+  const [sel, hash] = stocke.split(":");
+  const hashEssai = scryptSync(motDePasse, sel, 64).toString("hex");
+  const a = Buffer.from(hash, "hex");
+  const b = Buffer.from(hashEssai, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function requireAdmin(req, reply) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    reply.code(401).send({ erreur: "Authentification admin requise." });
+    return null;
+  }
+  const { rows } = await pool.query("SELECT * FROM admins WHERE token = $1", [token]);
+  if (!rows[0]) {
+    reply.code(401).send({ erreur: "Authentification admin requise." });
+    return null;
+  }
+  return rows[0];
+}
+
+app.get("/api/admin/existe", async () => {
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM admins");
+  return { existe: rows[0].n > 0 };
 });
 
-// Inscription d'un nouveau chauffeur affilié
+app.post("/api/admin/bootstrap", async (req, reply) => {
+  const { nom, telephone, motDePasse } = req.body || {};
+  const { rows: existants } = await pool.query("SELECT COUNT(*)::int AS n FROM admins");
+  if (existants[0].n > 0) {
+    return reply.code(409).send({ erreur: "Un compte admin existe déjà. Demandez une invitation." });
+  }
+  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
+    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
+  }
+  const token = id("tok");
+  await pool.query(
+    "INSERT INTO admins (id, nom, telephone, mot_de_passe_hash, token) VALUES ($1,$2,$3,$4,$5)",
+    [id("admin"), nom, telephone, hashMotDePasse(motDePasse), token]
+  );
+  return reply.code(201).send({ nom, telephone, token });
+});
+
+app.post("/api/admin/connexion", async (req, reply) => {
+  const { telephone, motDePasse } = req.body || {};
+  const { rows } = await pool.query("SELECT * FROM admins WHERE telephone = $1", [telephone]);
+  const admin = rows[0];
+  if (!admin || !verifierMotDePasse(motDePasse || "", admin.mot_de_passe_hash)) {
+    return reply.code(401).send({ erreur: "Numéro ou mot de passe incorrect." });
+  }
+  const token = id("tok");
+  await pool.query("UPDATE admins SET token = $1 WHERE id = $2", [token, admin.id]);
+  return { nom: admin.nom, telephone: admin.telephone, token };
+});
+
+app.post("/api/admin/inviter", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { nom, telephone, motDePasse } = req.body || {};
+  if (!nom || !telephone || !motDePasse || motDePasse.length < 6) {
+    return reply.code(400).send({ erreur: "nom, telephone et motDePasse (6 caractères min.) sont requis." });
+  }
+  const { rows: existant } = await pool.query("SELECT id FROM admins WHERE telephone = $1", [telephone]);
+  if (existant[0]) {
+    return reply.code(409).send({ erreur: "Un admin existe déjà avec ce numéro." });
+  }
+  await pool.query(
+    "INSERT INTO admins (id, nom, telephone, mot_de_passe_hash, token) VALUES ($1,$2,$3,$4,NULL)",
+    [id("admin"), nom, telephone, hashMotDePasse(motDePasse)]
+  );
+  return reply.code(201).send({ nom, telephone });
+});
+
+app.get("/api/admin/liste", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query("SELECT nom, telephone FROM admins ORDER BY cree_le");
+  return rows;
+});
+
+app.get("/api/admin/statistiques", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+
+  const { rows: globalRows } = await pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE statut = 'terminee')::int AS nb_terminees,
+      COUNT(*)::int AS nb_total,
+      COUNT(*) FILTER (WHERE statut = 'annulee')::int AS nb_annulees,
+      COUNT(*) FILTER (WHERE statut IN ('demandee','confirmee'))::int AS nb_en_cours,
+      COALESCE(SUM(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS ca_total,
+      COALESCE(SUM(commission) FILTER (WHERE statut = 'terminee'), 0)::int AS commission_totale
+    FROM rides
+  `);
+  const g = globalRows[0];
+
+  const { rows: parChauffeur } = await pool.query(`
+    SELECT
+      c.id AS chauffeur_id, c.nom, c.badge, c.zone,
+      COUNT(r.id) FILTER (WHERE r.statut = 'terminee')::int AS nb_courses,
+      COALESCE(SUM(r.montant) FILTER (WHERE r.statut = 'terminee'), 0)::int AS chiffre_affaires,
+      COALESCE(SUM(r.commission) FILTER (WHERE r.statut = 'terminee'), 0)::int AS commission,
+      COALESCE(SUM(r.part_chauffeur) FILTER (WHERE r.statut = 'terminee'), 0)::int AS part_chauffeur
+    FROM chauffeurs c
+    LEFT JOIN rides r ON r.chauffeur_id = c.id
+    GROUP BY c.id, c.nom, c.badge, c.zone
+    ORDER BY nb_courses DESC
+  `);
+
+  return {
+    global: {
+      nbCoursesTerminees: g.nb_terminees,
+      nbCoursesTotal: g.nb_total,
+      nbCoursesAnnulees: g.nb_annulees,
+      nbCoursesEnCours: g.nb_en_cours,
+      chiffreAffairesTotal: g.ca_total,
+      commissionTotale: g.commission_totale,
+    },
+    parChauffeur: parChauffeur.map((c) => ({
+      chauffeurId: c.chauffeur_id,
+      nom: c.nom,
+      badge: c.badge,
+      zone: c.zone,
+      nbCourses: c.nb_courses,
+      chiffreAffaires: c.chiffre_affaires,
+      commission: c.commission,
+      partChauffeur: c.part_chauffeur,
+    })),
+  };
+});
+
+// ---------- Référentiel ----------
+
+app.get("/api/zones", async () => ZONES);
+
+function versChauffeurDTO(row) {
+  return {
+    id: row.id,
+    role: "chauffeur",
+    nom: row.nom,
+    telephone: row.telephone,
+    zone: row.zone,
+    statut: row.statut,
+    badge: row.badge,
+    vehicule: {
+      id: `v_${row.id}`,
+      chauffeurId: row.id,
+      immatriculation: row.immatriculation,
+      kitGpl: row.kit_gpl,
+      dernierControle: row.dernier_controle,
+    },
+  };
+}
+
+app.get("/api/chauffeurs", async () => {
+  const { rows } = await pool.query("SELECT * FROM chauffeurs ORDER BY cree_le");
+  return rows.map(versChauffeurDTO);
+});
+
 app.post("/api/chauffeurs", async (req, reply) => {
   const { nom, telephone, zone, immatriculation } = req.body || {};
   if (!nom || !telephone || !zone || !immatriculation) {
@@ -228,43 +252,89 @@ app.post("/api/chauffeurs", async (req, reply) => {
   if (!ZONES.includes(zone)) {
     return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
   }
-  await db.read();
-  const telephoneExiste = db.data.users.some((u) => u.telephone === telephone);
-  if (telephoneExiste) {
+  const { rows: existant } = await pool.query("SELECT id FROM chauffeurs WHERE telephone = $1", [telephone]);
+  if (existant[0]) {
     return reply.code(409).send({ erreur: "Un chauffeur est déjà enregistré avec ce numéro." });
   }
-
+  const { rows: compte } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
+  const badge = `SCM-${String(compte[0].n + 1).padStart(3, "0")}`;
   const chauffeurId = id("u");
-  const nbChauffeurs = db.data.users.filter((u) => u.role === "chauffeur").length;
-  const badge = `SCM-${String(nbChauffeurs + 1).padStart(3, "0")}`;
+  const { rows } = await pool.query(
+    `INSERT INTO chauffeurs (id, nom, telephone, zone, statut, badge, immatriculation, kit_gpl, dernier_controle)
+     VALUES ($1,$2,$3,$4,'en attente de validation',$5,$6,'à diagnostiquer',NULL) RETURNING *`,
+    [chauffeurId, nom, telephone, zone, badge, immatriculation]
+  );
+  return reply.code(201).send(versChauffeurDTO(rows[0]));
+});
 
-  const chauffeur = {
-    id: chauffeurId,
-    role: "chauffeur",
-    nom,
-    telephone,
-    zone,
-    statut: "en attente de validation", // à valider par l'équipe avant première course (diagnostic gaz, contrat)
-    badge,
+app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query(
+    `UPDATE chauffeurs SET statut = 'actif', kit_gpl = 'posé' WHERE id = $1 RETURNING *`,
+    [req.params.chauffeurId]
+  );
+  if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  return versChauffeurDTO(rows[0]);
+});
+
+app.get("/api/chauffeurs/:chauffeurId/solde", async (req) => {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(commission),0)::int AS commission_due, COUNT(*)::int AS nb
+     FROM rides WHERE chauffeur_id = $1 AND statut = 'terminee' AND mode_paiement = 'especes'`,
+    [req.params.chauffeurId]
+  );
+  return { chauffeurId: req.params.chauffeurId, commissionDueEspeces: rows[0].commission_due, nbCourses: rows[0].nb };
+});
+
+app.get("/api/chauffeurs/:chauffeurId/gains", async (req) => {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS nb, COALESCE(SUM(montant),0)::int AS ca,
+            COALESCE(SUM(part_chauffeur),0)::int AS gains, COALESCE(SUM(commission),0)::int AS commission
+     FROM rides WHERE chauffeur_id = $1 AND statut = 'terminee'`,
+    [req.params.chauffeurId]
+  );
+  const r = rows[0];
+  return {
+    chauffeurId: req.params.chauffeurId,
+    nbCourses: r.nb,
+    chiffreAffaires: r.ca,
+    gainsChauffeur: r.gains,
+    commissionPlateforme: r.commission,
   };
-  const vehicule = {
-    id: id("v"),
-    chauffeurId,
-    immatriculation,
-    kitGpl: "à diagnostiquer",
-    dernierControle: null,
-  };
-  db.data.users.push(chauffeur);
-  db.data.vehicles.push(vehicule);
-  await db.write();
-  return reply.code(201).send({ ...chauffeur, vehicule });
 });
 
 // ---------- Courses ----------
 
-// Client crée une demande de course
+function versRideDTO(row, chauffeur) {
+  return {
+    id: row.id,
+    clientNom: row.client_nom,
+    clientTelephone: row.client_telephone,
+    zoneDepart: row.zone_depart,
+    zoneArrivee: row.zone_arrivee,
+    adresseArrivee: row.adresse_arrivee,
+    nombrePassagers: row.nombre_passagers,
+    position: row.position,
+    arrets: row.arrets,
+    distanceKm: row.distance_km === null ? null : Number(row.distance_km),
+    tarifBase: row.tarif_base,
+    supplementArrets: row.supplement_arrets,
+    montant: row.montant,
+    statut: row.statut,
+    chauffeurId: row.chauffeur_id,
+    modePaiement: row.mode_paiement,
+    commission: row.commission,
+    partChauffeur: row.part_chauffeur,
+    creeLe: row.cree_le,
+    historique: row.historique,
+    ...(chauffeur ? { chauffeur: versChauffeurDTO(chauffeur) } : {}),
+  };
+}
+
 app.post("/api/rides", async (req, reply) => {
-  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, nombrePassagers, position, arrets } = req.body || {};
+  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, nombrePassagers, position, arrets } =
+    req.body || {};
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
   }
@@ -272,7 +342,6 @@ app.post("/api/rides", async (req, reply) => {
   const positionValide =
     position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
 
-  // Jusqu'à 3 points de collecte supplémentaires (un par passager au-delà du 1er)
   const arretsValides = Array.isArray(arrets)
     ? arrets.slice(0, 3).map((a) => ({
         nom: typeof a?.nom === "string" ? a.nom.slice(0, 60) : "",
@@ -284,152 +353,166 @@ app.post("/api/rides", async (req, reply) => {
       }))
     : [];
 
-  await db.read();
   const { montant: tarifBase, distanceKm: distanceTrajet } = tarif(zoneDepart, zoneArrivee, passagers);
   const supplement = supplementArrets(zoneDepart, zoneArrivee, arretsValides);
-  const ride = {
-    id: id("ride"),
-    clientNom,
-    clientTelephone,
-    zoneDepart,
-    zoneArrivee,
-    adresseArrivee: typeof adresseArrivee === "string" ? adresseArrivee.slice(0, 150) : "",
-    nombrePassagers: passagers,
-    position: positionValide, // { lat, lng } ou null si non partagée / refusée
-    arrets: arretsValides.map((a) => {
-      const detail = supplement.details.find((d) => d.zone === a.zone);
-      return { ...a, distanceKm: detail?.distanceKm ?? null, surLeChemin: detail?.surLeChemin ?? true };
-    }), // points de collecte supplémentaires pour les autres passagers
-    distanceKm: distanceTrajet,
-    tarifBase,
-    supplementArrets: supplement.total,
-    montant: tarifBase + supplement.total,
-    statut: "demandee", // demandee -> confirmee -> terminee | annulee
-    chauffeurId: null,
-    modePaiement: null,
-    creeLe: new Date().toISOString(),
-    historique: [{ statut: "demandee", horodatage: new Date().toISOString() }],
-  };
-  db.data.rides.push(ride);
-  await db.write();
-  return reply.code(201).send(ride);
+  const arretsAvecDetail = arretsValides.map((a) => {
+    const detail = supplement.details.find((d) => d.zone === a.zone);
+    return { ...a, distanceKm: detail?.distanceKm ?? null, surLeChemin: detail?.surLeChemin ?? true };
+  });
+
+  const rideId = id("ride");
+  const historique = [{ statut: "demandee", horodatage: new Date().toISOString() }];
+
+  const { rows } = await pool.query(
+    `INSERT INTO rides
+      (id, client_nom, client_telephone, zone_depart, zone_arrivee, adresse_arrivee, nombre_passagers,
+       position, arrets, distance_km, tarif_base, supplement_arrets, montant, statut, historique)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'demandee',$14)
+     RETURNING *`,
+    [
+      rideId,
+      clientNom,
+      clientTelephone,
+      zoneDepart,
+      zoneArrivee,
+      typeof adresseArrivee === "string" ? adresseArrivee.slice(0, 150) : "",
+      passagers,
+      positionValide ? JSON.stringify(positionValide) : null,
+      JSON.stringify(arretsAvecDetail),
+      distanceTrajet,
+      tarifBase,
+      supplement.total,
+      tarifBase + supplement.total,
+      JSON.stringify(historique),
+    ]
+  );
+  return reply.code(201).send(versRideDTO(rows[0]));
 });
 
-// Suivi d'une course par le client (polling)
+async function chargerRideAvecChauffeur(rideId) {
+  const { rows } = await pool.query("SELECT * FROM rides WHERE id = $1", [rideId]);
+  const ride = rows[0];
+  if (!ride) return null;
+  let chauffeur = null;
+  if (ride.chauffeur_id) {
+    const { rows: cRows } = await pool.query("SELECT * FROM chauffeurs WHERE id = $1", [ride.chauffeur_id]);
+    chauffeur = cRows[0] || null;
+  }
+  return versRideDTO(ride, chauffeur);
+}
+
 app.get("/api/rides/:rideId", async (req, reply) => {
-  await db.read();
-  const ride = db.data.rides.find((r) => r.id === req.params.rideId);
-  if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
-  const chauffeur = ride.chauffeurId ? db.data.users.find((u) => u.id === ride.chauffeurId) : null;
-  return { ...ride, chauffeur };
+  const dto = await chargerRideAvecChauffeur(req.params.rideId);
+  if (!dto) return reply.code(404).send({ erreur: "Course introuvable." });
+  return dto;
 });
 
-// Liste des demandes disponibles pour un chauffeur (par zone de départ)
 app.get("/api/rides", async (req) => {
-  await db.read();
   const { statut, zone, chauffeurId } = req.query;
-  let rides = db.data.rides;
-  if (statut) rides = rides.filter((r) => r.statut === statut);
-  if (zone) rides = rides.filter((r) => r.zoneDepart === zone);
-  if (chauffeurId) rides = rides.filter((r) => r.chauffeurId === chauffeurId);
-  return rides.slice().reverse();
+  const conditions = [];
+  const valeurs = [];
+  if (statut) {
+    valeurs.push(statut);
+    conditions.push(`statut = $${valeurs.length}`);
+  }
+  if (zone) {
+    valeurs.push(zone);
+    conditions.push(`zone_depart = $${valeurs.length}`);
+  }
+  if (chauffeurId) {
+    valeurs.push(chauffeurId);
+    conditions.push(`chauffeur_id = $${valeurs.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(`SELECT * FROM rides ${where} ORDER BY cree_le DESC`, valeurs);
+  return rows.map((r) => versRideDTO(r));
 });
 
-// Chauffeur accepte une course
 app.post("/api/rides/:rideId/accepter", async (req, reply) => {
   const { chauffeurId } = req.body || {};
-  await db.read();
-  const ride = db.data.rides.find((r) => r.id === req.params.rideId);
-  if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
-  if (ride.statut !== "demandee") return reply.code(409).send({ erreur: "Cette course n'est plus disponible." });
-  const chauffeur = db.data.users.find((u) => u.id === chauffeurId && u.role === "chauffeur");
+  const { rows: cRows } = await pool.query("SELECT * FROM chauffeurs WHERE id = $1", [chauffeurId]);
+  const chauffeur = cRows[0];
   if (!chauffeur) return reply.code(400).send({ erreur: "Chauffeur inconnu." });
   if (chauffeur.statut !== "actif") {
-    return reply.code(403).send({ erreur: "Inscription en attente de validation (diagnostic gaz et signature du contrat requis avant la première course)." });
+    return reply
+      .code(403)
+      .send({ erreur: "Inscription en attente de validation avant la première course." });
   }
 
-  ride.statut = "confirmee";
-  ride.chauffeurId = chauffeurId;
-  ride.historique.push({ statut: "confirmee", horodatage: new Date().toISOString() });
-  await db.write();
-  return { ...ride, chauffeur };
+  // Mise à jour atomique : n'accepte que si la course est encore "demandee" (évite les doubles acceptations)
+  const { rows } = await pool.query(
+    `UPDATE rides
+     SET statut = 'confirmee', chauffeur_id = $1,
+         historique = historique || $2::jsonb
+     WHERE id = $3 AND statut = 'demandee'
+     RETURNING *`,
+    [chauffeurId, JSON.stringify([{ statut: "confirmee", horodatage: new Date().toISOString() }]), req.params.rideId]
+  );
+  if (!rows[0]) {
+    const { rows: check } = await pool.query("SELECT id FROM rides WHERE id = $1", [req.params.rideId]);
+    if (!check[0]) return reply.code(404).send({ erreur: "Course introuvable." });
+    return reply.code(409).send({ erreur: "Cette course n'est plus disponible." });
+  }
+  return versRideDTO(rows[0], chauffeur);
 });
 
-// Client confirme la fin de course + choix du mode de paiement (préalable obligatoire au règlement)
 app.post("/api/rides/:rideId/terminer", async (req, reply) => {
-  const { modePaiement } = req.body || {}; // "mobile_money" | "especes"
+  const { modePaiement } = req.body || {};
   if (!["mobile_money", "especes"].includes(modePaiement)) {
     return reply.code(400).send({ erreur: "modePaiement doit être 'mobile_money' ou 'especes'." });
   }
-  await db.read();
-  const ride = db.data.rides.find((r) => r.id === req.params.rideId);
+  const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
+  const ride = existant[0];
   if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
-  if (ride.statut !== "confirmee") return reply.code(409).send({ erreur: "Cette course ne peut pas être terminée depuis son statut actuel." });
+  if (ride.statut !== "confirmee") {
+    return reply.code(409).send({ erreur: "Cette course ne peut pas être terminée depuis son statut actuel." });
+  }
 
   const commission = Math.round(ride.montant * COMMISSION_RATE);
-  ride.statut = "terminee";
-  ride.modePaiement = modePaiement;
-  ride.commission = commission;
-  ride.partChauffeur = ride.montant - commission;
-  ride.historique.push({ statut: "terminee", horodatage: new Date().toISOString() });
-  await db.write();
-  return ride;
+  const partChauffeur = ride.montant - commission;
+
+  const { rows } = await pool.query(
+    `UPDATE rides
+     SET statut = 'terminee', mode_paiement = $1, commission = $2, part_chauffeur = $3,
+         historique = historique || $4::jsonb
+     WHERE id = $5
+     RETURNING *`,
+    [
+      modePaiement,
+      commission,
+      partChauffeur,
+      JSON.stringify([{ statut: "terminee", horodatage: new Date().toISOString() }]),
+      req.params.rideId,
+    ]
+  );
+  return versRideDTO(rows[0]);
 });
 
-// Annulation (client ou chauffeur)
 app.post("/api/rides/:rideId/annuler", async (req, reply) => {
-  await db.read();
-  const ride = db.data.rides.find((r) => r.id === req.params.rideId);
+  const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
+  const ride = existant[0];
   if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
   if (["terminee", "annulee"].includes(ride.statut)) {
     return reply.code(409).send({ erreur: "Cette course ne peut plus être annulée." });
   }
-  ride.statut = "annulee";
-  ride.historique.push({ statut: "annulee", horodatage: new Date().toISOString() });
-  await db.write();
-  return ride;
-});
-
-// Tableau de bord chauffeur : solde des commissions dues sur courses payées en espèces
-app.get("/api/chauffeurs/:chauffeurId/solde", async (req, reply) => {
-  await db.read();
-  const rides = db.data.rides.filter(
-    (r) => r.chauffeurId === req.params.chauffeurId && r.statut === "terminee" && r.modePaiement === "especes"
+  const { rows } = await pool.query(
+    `UPDATE rides SET statut = 'annulee', historique = historique || $1::jsonb WHERE id = $2 RETURNING *`,
+    [JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString() }]), req.params.rideId]
   );
-  const commissionDue = rides.reduce((sum, r) => sum + (r.commission || 0), 0);
-  return { chauffeurId: req.params.chauffeurId, commissionDueEspeces: commissionDue, nbCourses: rides.length };
-});
-
-// Résumé des gains personnels du chauffeur : ce qu'il a gagné, ce que la plateforme a pris
-app.get("/api/chauffeurs/:chauffeurId/gains", async (req, reply) => {
-  await db.read();
-  const courses = db.data.rides.filter((r) => r.chauffeurId === req.params.chauffeurId && r.statut === "terminee");
-  return {
-    chauffeurId: req.params.chauffeurId,
-    nbCourses: courses.length,
-    chiffreAffaires: courses.reduce((sum, r) => sum + (r.montant || 0), 0),
-    gainsChauffeur: courses.reduce((sum, r) => sum + (r.partChauffeur || 0), 0),
-    commissionPlateforme: courses.reduce((sum, r) => sum + (r.commission || 0), 0),
-  };
-});
-
-// Validation d'un chauffeur par l'équipe (après diagnostic gaz + signature du contrat)
-app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
-  const demandeur = await requireAdmin(req, reply);
-  if (!demandeur) return;
-  await db.read();
-  const chauffeur = db.data.users.find((u) => u.id === req.params.chauffeurId && u.role === "chauffeur");
-  if (!chauffeur) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
-  chauffeur.statut = "actif";
-  const vehicule = db.data.vehicles.find((v) => v.chauffeurId === chauffeur.id);
-  if (vehicule) vehicule.kitGpl = "posé";
-  await db.write();
-  return { ...chauffeur, vehicule };
+  return versRideDTO(rows[0]);
 });
 
 app.get("/api/health", async () => ({ ok: true }));
 
 const port = process.env.PORT || 8787;
-app.listen({ port, host: "0.0.0.0" }).then(() => {
-  console.log(`Sud-Comoé Mobilité API sur http://localhost:${port}`);
-});
+
+initDb()
+  .then(() => {
+    app.listen({ port, host: "0.0.0.0" }).then(() => {
+      console.log(`Sud-Comoé Mobilité API (PostgreSQL) sur http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Échec de l'initialisation de la base de données :", err);
+    process.exit(1);
+  });

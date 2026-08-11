@@ -1,32 +1,94 @@
-import { Low } from "lowdb";
-import { JSONFile } from "lowdb/node";
-import { nanoid } from "nanoid";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import pg from "pg";
+import { customAlphabet } from "nanoid";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const file = path.join(__dirname, "data.json");
-const adapter = new JSONFile(file);
-const defaultData = {
-  users: [
-    { id: "u_driver1", role: "chauffeur", nom: "Kouassi Yao", telephone: "0707000001", zone: "Yaou", statut: "actif", badge: "SCM-001" },
-    { id: "u_driver2", role: "chauffeur", nom: "Aka Brou", telephone: "0707000002", zone: "Bonoua", statut: "actif", badge: "SCM-002" },
-    { id: "u_driver3", role: "chauffeur", nom: "Diomande Sekou", telephone: "0707000003", zone: "Grand-Bassam", statut: "actif", badge: "SCM-003" },
-  ],
-  vehicles: [
-    { id: "v_1", chauffeurId: "u_driver1", immatriculation: "CI-1234-AB", kitGpl: "posé", dernierControle: "2026-06-01" },
-    { id: "v_2", chauffeurId: "u_driver2", immatriculation: "CI-5678-CD", kitGpl: "posé", dernierControle: "2026-05-15" },
-    { id: "v_3", chauffeurId: "u_driver3", immatriculation: "CI-9012-EF", kitGpl: "non posé", dernierControle: null },
-  ],
-  rides: [],
-  admins: [],
-};
+const { Pool } = pg;
 
-export const db = new Low(adapter, defaultData);
-await db.read();
-db.data ||= defaultData;
-await db.write();
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL manquant — définissez cette variable d'environnement avant de démarrer le serveur.");
+  process.exit(1);
+}
 
+// Render (et la plupart des hébergeurs Postgres managés) exigent SSL, mais avec un certificat
+// auto-signé côté interne : on désactive la vérification stricte plutôt que de gérer un CA custom.
+const utiliseSSL = /render\.com|amazonaws\.com|neon\.tech|supabase\.co/.test(process.env.DATABASE_URL);
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: utiliseSSL ? { rejectUnauthorized: false } : false,
+});
+
+const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 8);
 export function id(prefix) {
-  return `${prefix}_${nanoid(8)}`;
+  return `${prefix}_${nanoid()}`;
+}
+
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chauffeurs (
+      id TEXT PRIMARY KEY,
+      nom TEXT NOT NULL,
+      telephone TEXT UNIQUE NOT NULL,
+      zone TEXT NOT NULL,
+      statut TEXT NOT NULL DEFAULT 'en attente de validation',
+      badge TEXT NOT NULL,
+      immatriculation TEXT,
+      kit_gpl TEXT,
+      dernier_controle TEXT,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS rides (
+      id TEXT PRIMARY KEY,
+      client_nom TEXT NOT NULL,
+      client_telephone TEXT NOT NULL,
+      zone_depart TEXT NOT NULL,
+      zone_arrivee TEXT NOT NULL,
+      adresse_arrivee TEXT DEFAULT '',
+      nombre_passagers INT NOT NULL DEFAULT 1,
+      position JSONB,
+      arrets JSONB NOT NULL DEFAULT '[]',
+      distance_km NUMERIC,
+      tarif_base INT,
+      supplement_arrets INT DEFAULT 0,
+      montant INT NOT NULL,
+      statut TEXT NOT NULL DEFAULT 'demandee',
+      chauffeur_id TEXT REFERENCES chauffeurs(id),
+      mode_paiement TEXT,
+      commission INT,
+      part_chauffeur INT,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
+      historique JSONB NOT NULL DEFAULT '[]'
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admins (
+      id TEXT PRIMARY KEY,
+      nom TEXT NOT NULL,
+      telephone TEXT UNIQUE NOT NULL,
+      mot_de_passe_hash TEXT NOT NULL,
+      token TEXT,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
+  if (rows[0].n === 0) {
+    const demo = [
+      ["u_driver1", "Kouassi Yao", "0707000001", "Yaou", "actif", "SCM-001", "CI-1234-AB", "posé", "2026-06-01"],
+      ["u_driver2", "Aka Brou", "0707000002", "Bonoua", "actif", "SCM-002", "CI-5678-CD", "posé", "2026-05-15"],
+      ["u_driver3", "Diomande Sekou", "0707000003", "Grand-Bassam", "actif", "SCM-003", "CI-9012-EF", "non posé", null],
+    ];
+    for (const d of demo) {
+      await pool.query(
+        `INSERT INTO chauffeurs (id, nom, telephone, zone, statut, badge, immatriculation, kit_gpl, dernier_controle)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+        d
+      );
+    }
+    console.log("Chauffeurs de démonstration insérés (premier démarrage).");
+  }
 }
