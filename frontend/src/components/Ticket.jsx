@@ -21,18 +21,55 @@ export default function Ticket({ course, children }) {
         <div className="ticket__meta">
           {course.clientNom}
           {course.nombrePassagers ? ` · ${course.nombrePassagers} passager${course.nombrePassagers > 1 ? "s" : ""}` : ""}
+          {typeof course.distanceKm === "number" ? ` · ≈ ${course.distanceKm} km` : ""}
           {course.chauffeur ? ` · Chauffeur : ${course.chauffeur.nom} (${course.chauffeur.badge})` : ""}
         </div>
+        {course.adresseArrivee && (
+          <div className="ticket__meta" style={{ marginTop: 2 }}>
+            🏁 {course.adresseArrivee}
+          </div>
+        )}
         {course.position && (
           <a
             href={`https://www.google.com/maps?q=${course.position.lat},${course.position.lng}`}
             target="_blank"
             rel="noreferrer"
             className="pill"
-            style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}
+            style={{ display: "inline-block", marginTop: 8, marginRight: 6, textDecoration: "none" }}
           >
-            📍 Voir la position exacte sur la carte
+            📍 Position du client
           </a>
+        )}
+        {course.arrets && course.arrets.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div className="ticket__amount-label" style={{ marginBottom: 4 }}>
+              Autres passagers à récupérer
+            </div>
+            {course.arrets.map((a, i) => (
+              <div key={i} style={{ fontSize: 13, marginBottom: 3 }}>
+                {a.nom || `Passager ${i + 2}`} — {a.zone}
+                {a.surLeChemin ? (
+                  <span style={{ color: "var(--color-success)" }}> · sur le chemin</span>
+                ) : typeof a.distanceKm === "number" ? (
+                  ` (+${a.distanceKm} km de détour)`
+                ) : (
+                  ""
+                )}
+                {a.position && (
+                  <>
+                    {" "}
+                    <a
+                      href={`https://www.google.com/maps?q=${a.position.lat},${a.position.lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      📍 voir
+                    </a>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
         )}
         {children}
       </div>
@@ -41,6 +78,11 @@ export default function Ticket({ course, children }) {
         <div>
           <div className="ticket__amount-label">Montant</div>
           <div className="ticket__amount">{course.montant} FCFA</div>
+          {course.supplementArrets > 0 && (
+            <div style={{ fontSize: 11, color: "var(--color-ink-soft)", marginTop: 2 }}>
+              dont {course.supplementArrets} FCFA de détour ({course.arrets?.filter((a) => !a.surLeChemin).length} arrêt{course.arrets?.filter((a) => !a.surLeChemin).length > 1 ? "s" : ""} hors chemin)
+            </div>
+          )}
         </div>
         <div className="ticket__code">
           {course.id.replace("ride_", "SCM-").toUpperCase()}

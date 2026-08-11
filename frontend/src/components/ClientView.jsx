@@ -3,9 +3,10 @@ import { api } from "../api.js";
 import Ticket from "./Ticket.jsx";
 
 export default function ClientView({ zones, onToast }) {
-  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", nombrePassagers: 1 });
+  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", adresseArrivee: "", nombrePassagers: 1 });
   const [position, setPosition] = useState(null); // { lat, lng } une fois localisé
   const [localisation, setLocalisation] = useState("inactif"); // inactif | en_cours | ok | refuse
+  const [arrets, setArrets] = useState([]); // jusqu'à 3 points de collecte supplémentaires
   const [course, setCourse] = useState(null);
   const [modePaiement, setModePaiement] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -30,6 +31,40 @@ export default function ClientView({ zones, onToast }) {
     }, 2500);
     return () => clearInterval(pollRef.current);
   }, [course?.id, course?.statut]);
+
+  useEffect(() => {
+    const nbArretsRequis = Math.max(0, Math.min(3, form.nombrePassagers - 1));
+    setArrets((prev) => {
+      const next = prev.slice(0, nbArretsRequis);
+      while (next.length < nbArretsRequis) {
+        next.push({ nom: "", zone: form.zoneDepart, position: null, localisation: "inactif" });
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.nombrePassagers]);
+
+  function majArret(index, champ, valeur) {
+    setArrets((prev) => prev.map((a, i) => (i === index ? { ...a, [champ]: valeur } : a)));
+  }
+
+  function localiserArret(index) {
+    if (!navigator.geolocation) {
+      onToast("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    majArret(index, "localisation", "en_cours");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        majArret(index, "position", { lat: pos.coords.latitude, lng: pos.coords.longitude });
+        majArret(index, "localisation", "ok");
+      },
+      () => {
+        majArret(index, "localisation", "refuse");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
 
   const handleChange = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -63,7 +98,11 @@ export default function ClientView({ zones, onToast }) {
     }
     setLoading(true);
     try {
-      const created = await api.creerCourse({ ...form, position });
+      const created = await api.creerCourse({
+        ...form,
+        position,
+        arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, position: a.position })),
+      });
       setCourse(created);
     } catch (err) {
       onToast(err.message);
@@ -180,6 +219,16 @@ export default function ClientView({ zones, onToast }) {
         </div>
       </div>
 
+      <div className="field">
+        <label htmlFor="adresseArrivee">Adresse précise d'arrivée (facultatif)</label>
+        <input
+          id="adresseArrivee"
+          value={form.adresseArrivee}
+          onChange={handleChange("adresseArrivee")}
+          placeholder="Ex. Près du marché, en face de la pharmacie..."
+        />
+      </div>
+
       <div className="field" style={{ marginBottom: 0 }}>
         <label>Nombre de passagers</label>
         <div className="pay-choice" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
@@ -217,6 +266,46 @@ export default function ClientView({ zones, onToast }) {
           Aide le chauffeur à vous retrouver précisément, en plus de la zone choisie ci-dessus.
         </p>
       </div>
+
+      {arrets.length > 0 && (
+        <>
+          <div style={{ height: 6 }} />
+          <p className="section-label" style={{ margin: "4px 2px 8px" }}>
+            Récupérer {arrets.length} autre{arrets.length > 1 ? "s" : ""} passager{arrets.length > 1 ? "s" : ""}
+          </p>
+          {arrets.map((arret, i) => (
+            <div key={i} className="card" style={{ background: "var(--color-primary-tint)", boxShadow: "none", padding: 14, marginBottom: 10 }}>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label>Nom de la personne {i + 1}</label>
+                <input
+                  value={arret.nom}
+                  onChange={(e) => majArret(i, "nom", e.target.value)}
+                  placeholder="Ex. Aïcha"
+                />
+              </div>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label>Zone où la récupérer</label>
+                <select value={arret.zone} onChange={(e) => majArret(i, "zone", e.target.value)}>
+                  {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => localiserArret(i)}
+                disabled={arret.localisation === "en_cours"}
+                style={{ padding: "10px 14px", fontSize: 13.5 }}
+              >
+                {arret.localisation === "ok"
+                  ? "📍 Position partagée — recommencer"
+                  : arret.localisation === "en_cours"
+                  ? "Localisation…"
+                  : "📍 Partager sa position (si vous êtes avec elle)"}
+              </button>
+            </div>
+          ))}
+        </>
+      )}
 
       <div style={{ height: 16 }} />
       <button className="btn btn--accent" type="submit" disabled={loading}>

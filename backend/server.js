@@ -136,14 +136,74 @@ app.get("/api/admin/statistiques", async (req, reply) => {
   return { global: toutesCourses, parChauffeur: parChauffeur.sort((a, b) => b.nbCourses - a.nbCourses) };
 });
 
-const FOURCHETTES_LOCALE = { 1: [500, 800], 2: [800, 1000], 3: [1000, 1200], 4: [1200, 1400] };
-const FOURCHETTES_INTER_ZONE = { 1: [800, 1400], 2: [1400, 1700], 3: [1700, 2000], 4: [2000, 2300] };
+// Coordonnées approximatives des centres de zone (WGS84), pour calcul de distance à vol d'oiseau
+const ZONE_COORDS = {
+  Yaou: { lat: 5.2344, lng: -3.6346 },
+  "Grand-Bassam": { lat: 5.2118, lng: -3.7388 },
+  Bonoua: { lat: 5.2725, lng: -3.5963 },
+  Samo: { lat: 5.2900, lng: -3.6100 }, // estimation approximative, à corriger si coordonnées précises disponibles
+};
+
+function distanceKm(zoneA, zoneB) {
+  const a = ZONE_COORDS[zoneA];
+  const b = ZONE_COORDS[zoneB];
+  if (!a || !b) return 8; // repli raisonnable si une zone est inconnue
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+const PRIX_PAR_KM = 150; // FCFA/km, course principale
+const PRIX_PAR_KM_DETOUR = 80; // FCFA/km, point de collecte supplémentaire (trajet plus court en général)
+const TARIF_MINIMUM = 400; // plancher pour une très courte course
+
+function facteurPassagers(n) {
+  return 1 + (n - 1) * 0.25; // 1 → x1, 2 → x1.25, 3 → x1.5, 4 → x1.75
+}
+
+function arrondir50(valeur) {
+  return Math.round(valeur / 50) * 50;
+}
 
 function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
-  const [min, max] = zoneDepart === zoneArrivee ? FOURCHETTES_LOCALE[n] : FOURCHETTES_INTER_ZONE[n];
-  const pas = Math.floor((max - min) / 100) + 1;
-  return min + Math.floor(Math.random() * pas) * 100;
+  // Trajet intra-zone : pas de centres de zone distincts, on estime une courte distance locale
+  const distance = zoneDepart === zoneArrivee ? 1 + Math.random() * 3 : distanceKm(zoneDepart, zoneArrivee);
+  const montant = arrondir50(Math.max(TARIF_MINIMUM, distance * PRIX_PAR_KM) * facteurPassagers(n));
+  return { montant, distanceKm: Math.round(distance * 10) / 10 };
+}
+
+const SEUIL_SUR_LE_CHEMIN_KM = 1.5; // en dessous, le détour est jugé négligeable : pas de supplément
+
+// Kilomètres ajoutés par un crochet via zoneArret, comparé au trajet direct départ → arrivée
+function detourExtraKm(zoneDepart, zoneArrivee, zoneArret) {
+  if (zoneDepart === zoneArrivee) {
+    // Trajet local : une collecte dans la même zone est considérée sur le chemin (pas de détour réel).
+    // Une collecte dans une autre zone impose un aller-retour complet avant de continuer.
+    return zoneArret === zoneDepart ? 0 : 2 * distanceKm(zoneDepart, zoneArret);
+  }
+  const trajetDirect = distanceKm(zoneDepart, zoneArrivee);
+  const trajetViaArret = distanceKm(zoneDepart, zoneArret) + distanceKm(zoneArret, zoneArrivee);
+  return Math.max(0, trajetViaArret - trajetDirect);
+}
+
+function supplementArrets(zoneDepart, zoneArrivee, arrets) {
+  if (!Array.isArray(arrets)) return { total: 0, details: [] };
+  const details = [];
+  let total = 0;
+  for (const a of arrets) {
+    if (!a || !a.zone) continue;
+    const extraKm = detourExtraKm(zoneDepart, zoneArrivee, a.zone);
+    const surLeChemin = extraKm <= SEUIL_SUR_LE_CHEMIN_KM;
+    const cout = surLeChemin ? 0 : arrondir50(extraKm * PRIX_PAR_KM_DETOUR);
+    total += cout;
+    details.push({ zone: a.zone, distanceKm: Math.round(extraKm * 10) / 10, surLeChemin, cout });
+  }
+  return { total, details };
 }
 
 // ---------- Référentiel ----------
@@ -204,23 +264,46 @@ app.post("/api/chauffeurs", async (req, reply) => {
 
 // Client crée une demande de course
 app.post("/api/rides", async (req, reply) => {
-  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, nombrePassagers, position } = req.body || {};
+  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, nombrePassagers, position, arrets } = req.body || {};
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
   }
   const passagers = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
   const positionValide =
     position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
+
+  // Jusqu'à 3 points de collecte supplémentaires (un par passager au-delà du 1er)
+  const arretsValides = Array.isArray(arrets)
+    ? arrets.slice(0, 3).map((a) => ({
+        nom: typeof a?.nom === "string" ? a.nom.slice(0, 60) : "",
+        zone: ZONES.includes(a?.zone) ? a.zone : zoneDepart,
+        position:
+          a?.position && typeof a.position.lat === "number" && typeof a.position.lng === "number"
+            ? a.position
+            : null,
+      }))
+    : [];
+
   await db.read();
+  const { montant: tarifBase, distanceKm: distanceTrajet } = tarif(zoneDepart, zoneArrivee, passagers);
+  const supplement = supplementArrets(zoneDepart, zoneArrivee, arretsValides);
   const ride = {
     id: id("ride"),
     clientNom,
     clientTelephone,
     zoneDepart,
     zoneArrivee,
+    adresseArrivee: typeof adresseArrivee === "string" ? adresseArrivee.slice(0, 150) : "",
     nombrePassagers: passagers,
     position: positionValide, // { lat, lng } ou null si non partagée / refusée
-    montant: tarif(zoneDepart, zoneArrivee, passagers),
+    arrets: arretsValides.map((a) => {
+      const detail = supplement.details.find((d) => d.zone === a.zone);
+      return { ...a, distanceKm: detail?.distanceKm ?? null, surLeChemin: detail?.surLeChemin ?? true };
+    }), // points de collecte supplémentaires pour les autres passagers
+    distanceKm: distanceTrajet,
+    tarifBase,
+    supplementArrets: supplement.total,
+    montant: tarifBase + supplement.total,
     statut: "demandee", // demandee -> confirmee -> terminee | annulee
     chauffeurId: null,
     modePaiement: null,

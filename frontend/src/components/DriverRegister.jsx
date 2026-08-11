@@ -29,8 +29,7 @@ export default function DriverRegister({ zones, onToast, onInscrit, onAnnuler })
     <form className="card" onSubmit={handleSubmit}>
       <p className="card__title">Devenir chauffeur affilié</p>
       <p className="card__hint">
-        Après inscription, l'équipe Sud-Comoé Mobilité doit valider votre profil (diagnostic gaz et signature
-        du contrat d'affiliation) avant votre première course.
+        Après inscription, l'équipe Sud-Comoé Mobilité doit valider votre profil avant votre première course.
       </p>
 
       <div className="field">

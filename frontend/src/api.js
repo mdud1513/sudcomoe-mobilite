@@ -1,12 +1,35 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8787";
 
-async function request(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.erreur || "Une erreur est survenue.");
+function attendre(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function request(path, options = {}, tentative = 0) {
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    });
+  } catch {
+    // Échec réseau (souvent : le serveur Render était en veille et se réveille)
+    if (tentative < 2) {
+      await attendre(3000 * (tentative + 1));
+      return request(path, options, tentative + 1);
+    }
+    throw new Error("Le serveur ne répond pas. Vérifiez votre connexion et réessayez dans quelques secondes.");
+  }
+
+  // Le serveur se réveille (ou est temporairement indisponible) : Render renvoie parfois une page d'erreur non-JSON
+  if ([502, 503, 504].includes(res.status) && tentative < 2) {
+    await attendre(3000 * (tentative + 1));
+    return request(path, options, tentative + 1);
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.erreur || `Le serveur a mis du temps à répondre (code ${res.status}). Réessayez.`);
+  }
   return data;
 }
 
