@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <clipPath id="coins-arrondis">
+      <rect x="0" y="0" width="512" height="512" rx="112" ry="112" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#coins-arrondis)">
+    <rect x="0" y="0" width="512" height="512" fill="#0F5257" />
+    <rect x="0" y="430" width="512" height="82" fill="#E8A33D" />
+  </g>
+  <text
+    x="256"
+    y="300"
+    text-anchor="middle"
+    font-family="Arial, Helvetica, sans-serif"
+    font-weight="700"
+    font-size="266"
+    fill="#F6EFE4"
+  >S</text>
+</svg>
