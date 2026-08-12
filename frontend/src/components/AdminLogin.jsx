@@ -36,7 +36,7 @@ export default function AdminLogin({ onConnecte, onToast }) {
       <p className="card__title">{adminExiste ? "Connexion admin" : "Créer le compte administrateur"}</p>
       <p className="card__hint">
         {adminExiste
-          ? "Accès réservé à l'équipe Sud-Comoé Mobilité."
+          ? "Accès réservé à l'équipe Scotrans."
           : "Aucun compte admin n'existe encore — créez le premier ici. Vous pourrez ensuite en inviter d'autres."}
       </p>
 

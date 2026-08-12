@@ -43,7 +43,7 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <p className="app-header__eyebrow">Sud-Comoé · Prototype</p>
-        <h1 className="app-header__title">Sud-Comoé Mobilité</h1>
+        <h1 className="app-header__title">Scotrans</h1>
         <p className="app-header__sub">Taxi sécurisé — Yaou, Bassam, Bonoua, Samo</p>
 
         <div className="role-switch">

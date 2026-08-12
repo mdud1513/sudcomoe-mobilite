@@ -24,14 +24,14 @@ self.addEventListener("fetch", (e) => {
 
 // Reçoit une notification push même si l'appli n'est pas ouverte au premier plan
 self.addEventListener("push", (event) => {
-  let data = { titre: "Sud-Comoé Mobilité", corps: "Mise à jour de votre course.", rideId: null, role: null };
+  let data = { titre: "Scotrans", corps: "Mise à jour de votre course.", rideId: null, role: null };
   try {
     data = event.data.json();
   } catch {
     /* payload non-JSON, on garde les valeurs par défaut */
   }
   event.waitUntil(
-    self.registration.showNotification(data.titre || "Sud-Comoé Mobilité", {
+    self.registration.showNotification(data.titre || "Scotrans", {
       body: data.corps || "",
       icon: "/icon-192.png",
       badge: "/icon-192.png",

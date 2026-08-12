@@ -167,6 +167,18 @@ export default function DriverView({ zones, onToast }) {
     }
   }
 
+  async function clientNeConfirmePas(rideId) {
+    if (!window.confirm("Annuler cette course ? Le client n'a jamais confirmé malgré la relance. Un signalement sera enregistré.")) return;
+    try {
+      await api.clientNeConfirmePas(rideId, session.token);
+      setCourseActive(null);
+      onToast("Course annulée et signalement enregistré.");
+      rafraichir();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   if (!session || inscription) {
     if (inscription) {
       return (
@@ -234,7 +246,7 @@ export default function DriverView({ zones, onToast }) {
                 </div>
               </div>
               <div>
-                <div className="ticket__amount-label">Commission Sud-Comoé Mobilité</div>
+                <div className="ticket__amount-label">Commission Scotrans</div>
                 <div className="ticket__amount" style={{ fontSize: 24 }}>{gains.commissionPlateforme} FCFA</div>
               </div>
             </div>
@@ -258,7 +270,7 @@ export default function DriverView({ zones, onToast }) {
         <div className="card" style={{ marginTop: 16 }}>
           <p className="card__title" style={{ fontSize: 15 }}>Inscription en attente de validation</p>
           <p className="card__hint" style={{ marginBottom: 0 }}>
-            Statut : <span className="pill">{chauffeur.statut}</span>. L'équipe Sud-Comoé Mobilité doit
+            Statut : <span className="pill">{chauffeur.statut}</span>. L'équipe Scotrans doit
             confirmer le diagnostic gaz et la signature du contrat d'affiliation avant que vous puissiez
             accepter des courses.
           </p>
@@ -319,6 +331,9 @@ export default function DriverView({ zones, onToast }) {
                 {courseActive.derniereRelanceLe && Date.now() - new Date(courseActive.derniereRelanceLe).getTime() < 60000
                   ? `🔔 Relance envoyée — patientez ${Math.ceil((60000 - (Date.now() - new Date(courseActive.derniereRelanceLe).getTime())) / 1000)}s`
                   : "🔔 Relancer le client"}
+              </button>
+              <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => clientNeConfirmePas(courseActive.id)}>
+                🚫 Client ne confirme pas — annuler
               </button>
             </div>
           )}

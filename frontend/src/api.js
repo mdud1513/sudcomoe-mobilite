@@ -60,6 +60,7 @@ export const api = {
   accepter: (id, token) => request(`/api/rides/${id}/accepter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   liberer: (id, token) => request(`/api/rides/${id}/liberer`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   clientIntrouvable: (id, token) => request(`/api/rides/${id}/client-introuvable`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  clientNeConfirmePas: (id, token) => request(`/api/rides/${id}/client-ne-confirme-pas`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
   signaler: (id, auteur, message) =>

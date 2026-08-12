@@ -258,7 +258,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
     try {
       const updated = await api.terminer(course.id, modePaiement);
       setCourse(updated);
-      onToast("Course terminée. Merci d'avoir voyagé avec Sud-Comoé Mobilité.");
+      onToast("Course terminée. Merci d'avoir voyagé avec Scotrans.");
     } catch (err) {
       onToast(err.message);
     }

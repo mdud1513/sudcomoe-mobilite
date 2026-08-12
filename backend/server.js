@@ -801,6 +801,41 @@ app.post("/api/rides/:rideId/client-introuvable", async (req, reply) => {
   return versRideDTO(rows[0]);
 });
 
+// Le client ne confirme jamais alors que le chauffeur est arrivé à destination : sortie de secours pour le chauffeur
+app.post("/api/rides/:rideId/client-ne-confirme-pas", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+
+  const { rows } = await pool.query(
+    `UPDATE rides
+     SET statut = 'annulee', historique = historique || $1::jsonb
+     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'arrivee'
+     RETURNING *`,
+    [
+      JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString(), note: "client ne confirme pas" }]),
+      req.params.rideId,
+      chauffeur.id,
+    ]
+  );
+  if (!rows[0]) {
+    return reply.code(409).send({ erreur: "Cette course ne peut pas être annulée pour ce motif dans son état actuel." });
+  }
+
+  await pool.query(
+    `INSERT INTO signalements (id, ride_id, auteur, message) VALUES ($1,$2,'chauffeur',$3)`,
+    [id("sig"), req.params.rideId, `Le client n'a jamais confirmé/payé à destination (${rows[0].zone_arrivee}).`]
+  );
+
+  notifierClientDeLaCourse(req.params.rideId, {
+    titre: "Course annulée",
+    corps: "Course annulée faute de confirmation. Contactez-nous si besoin.",
+    rideId: req.params.rideId,
+    role: "client",
+  }).catch(() => {});
+
+  return versRideDTO(rows[0]);
+});
+
 // Le chauffeur signale qu'il est arrivé au point de prise en charge du client
 app.post("/api/rides/:rideId/arrivee-client", async (req, reply) => {
   const chauffeur = await requireChauffeur(req, reply);
@@ -1033,7 +1068,7 @@ const port = process.env.PORT || 8787;
 initDb()
   .then(() => {
     app.listen({ port, host: "0.0.0.0" }).then(() => {
-      console.log(`Sud-Comoé Mobilité API (PostgreSQL) sur http://localhost:${port}`);
+      console.log(`Scotrans API (PostgreSQL) sur http://localhost:${port}`);
     });
   })
   .catch((err) => {
