@@ -139,7 +139,17 @@ export default function DriverView({ zones, onToast }) {
 
   async function marquerArriveeClient(rideId) {
     try {
-      const updated = await api.arriveeClient(rideId, session.token);
+      let position = null;
+      if (navigator.geolocation) {
+        position = await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 8000 }
+          );
+        });
+      }
+      const updated = await api.arriveeClient(rideId, session.token, position);
       setCourseActive(updated);
       onToast("Le client a été notifié de votre arrivée.");
     } catch (err) {
@@ -300,10 +310,27 @@ export default function DriverView({ zones, onToast }) {
           {courseActive.statut === "confirmee" && courseActive.chauffeurArriveLe && (
             <>
               <p className="card__hint" style={{ textAlign: "center", marginTop: 12 }}>
-                Client notifié de votre arrivée. Une fois le trajet commencé, marquez l'arrivée à destination.
+                Client notifié de votre arrivée
+                {courseActive.chauffeurArriveLe && (
+                  <> · depuis {Math.max(0, Math.round((Date.now() - new Date(courseActive.chauffeurArriveLe).getTime()) / 60000))} min</>
+                )}
+                . Une fois le trajet commencé, marquez l'arrivée à destination.
               </p>
               <button className="btn btn--primary" onClick={() => marquerArriveeDestination(courseActive.id)}>
                 🏁 Arrivé à destination
+              </button>
+              <button
+                className="btn btn--outline"
+                style={{ marginTop: 10 }}
+                onClick={() => relancerClient(courseActive.id)}
+                disabled={
+                  courseActive.derniereRelanceLe &&
+                  Date.now() - new Date(courseActive.derniereRelanceLe).getTime() < 60000
+                }
+              >
+                {courseActive.derniereRelanceLe && Date.now() - new Date(courseActive.derniereRelanceLe).getTime() < 60000
+                  ? `🔔 Relance envoyée — patientez ${Math.ceil((60000 - (Date.now() - new Date(courseActive.derniereRelanceLe).getTime())) / 1000)}s`
+                  : "🔔 Relancer le client"}
               </button>
               <button className="btn btn--danger-outline" style={{ marginTop: 10 }} onClick={() => clientIntrouvable(courseActive.id)}>
                 🚫 Client introuvable — annuler

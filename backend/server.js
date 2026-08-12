@@ -29,6 +29,10 @@ function distanceKm(zoneA, zoneB) {
   const a = ZONE_COORDS[zoneA];
   const b = ZONE_COORDS[zoneB];
   if (!a || !b) return 8;
+  return distanceEntrePoints(a, b);
+}
+
+function distanceEntrePoints(a, b) {
   const R = 6371;
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
@@ -544,6 +548,7 @@ function versRideDTO(row, chauffeur) {
     historique: row.historique,
     tempsAttenteMinutes: row.temps_attente_minutes,
     chauffeurArriveLe: row.chauffeur_arrive_le,
+    chauffeurPositionArrivee: row.chauffeur_position_arrivee,
     arriveeDestinationLe: row.arrivee_destination_le,
     derniereRelanceLe: row.derniere_relance_le,
     heureArriveeEstimee: row.heure_arrivee_estimee,
@@ -840,16 +845,46 @@ app.post("/api/rides/:rideId/client-ne-confirme-pas", async (req, reply) => {
 app.post("/api/rides/:rideId/arrivee-client", async (req, reply) => {
   const chauffeur = await requireChauffeur(req, reply);
   if (!chauffeur) return;
+
+  const { position } = req.body || {};
+  const positionValide =
+    position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
+
   const { rows } = await pool.query(
-    `UPDATE rides SET chauffeur_arrive_le = now(), historique = historique || $1::jsonb
-     WHERE id = $2 AND chauffeur_id = $3 AND statut = 'confirmee' RETURNING *`,
-    [JSON.stringify([{ statut: "chauffeur_arrive", horodatage: new Date().toISOString() }]), req.params.rideId, chauffeur.id]
+    `UPDATE rides SET chauffeur_arrive_le = now(), chauffeur_position_arrivee = $1, historique = historique || $2::jsonb
+     WHERE id = $3 AND chauffeur_id = $4 AND statut = 'confirmee' RETURNING *`,
+    [
+      positionValide ? JSON.stringify(positionValide) : null,
+      JSON.stringify([{ statut: "chauffeur_arrive", horodatage: new Date().toISOString() }]),
+      req.params.rideId,
+      chauffeur.id,
+    ]
   );
   if (!rows[0]) return reply.code(409).send({ erreur: "Impossible de marquer l'arrivée pour cette course." });
 
+  // Écart suspect entre la position déclarée du chauffeur et celle partagée par le client : signalement automatique
+  const positionClient = rows[0].position;
+  let ecartKm = null;
+  if (positionValide && positionClient) {
+    ecartKm = distanceEntrePoints(positionValide, positionClient);
+    if (ecartKm > 0.05) {
+      const ecartLisible = ecartKm < 1 ? `${Math.round(ecartKm * 1000)} m` : `${ecartKm.toFixed(1)} km`;
+      await pool.query(`INSERT INTO signalements (id, ride_id, auteur, message) VALUES ($1,$2,'systeme',$3)`, [
+        id("sig"),
+        req.params.rideId,
+        `Écart de ${ecartLisible} entre la position déclarée du chauffeur à l'arrivée et celle partagée par le client — à vérifier.`,
+      ]);
+    }
+  }
+
+  const corpsClient =
+    ecartKm !== null && ecartKm <= 0.05
+      ? `${chauffeur.nom} est arrivé — position vérifiée, il est bien sur place.`
+      : `${chauffeur.nom} vous attend au point de prise en charge.`;
+
   const payloadClient = {
-    titre: "Le chauffeur est arrivé",
-    corps: `${chauffeur.nom} vous attend au point de prise en charge.`,
+    titre: ecartKm !== null && ecartKm <= 0.05 ? "✅ Le chauffeur est arrivé" : "Le chauffeur est arrivé",
+    corps: corpsClient,
     rideId: req.params.rideId,
     role: "client",
   };
@@ -900,7 +935,9 @@ app.post("/api/rides/:rideId/relancer-client", async (req, reply) => {
   if (!chauffeur) return;
 
   const { rows: existant } = await pool.query(
-    "SELECT * FROM rides WHERE id = $1 AND chauffeur_id = $2 AND statut = 'arrivee'",
+    `SELECT * FROM rides
+     WHERE id = $1 AND chauffeur_id = $2
+       AND (statut = 'arrivee' OR (statut = 'confirmee' AND chauffeur_arrive_le IS NOT NULL))`,
     [req.params.rideId, chauffeur.id]
   );
   const ride = existant[0];
@@ -919,9 +956,14 @@ app.post("/api/rides/:rideId/relancer-client", async (req, reply) => {
     [req.params.rideId]
   );
 
+  const corps =
+    ride.statut === "arrivee"
+      ? "Votre chauffeur attend toujours votre confirmation et le règlement de la course."
+      : `${chauffeur.nom} est arrivé au point de prise en charge et vous attend toujours.`;
+
   notifierClientDeLaCourse(req.params.rideId, {
     titre: "Rappel — course en attente",
-    corps: "Votre chauffeur attend toujours votre confirmation et le règlement de la course.",
+    corps,
     rideId: req.params.rideId,
     role: "client",
   }).catch(() => {});
@@ -1005,6 +1047,32 @@ app.post("/api/rides/:rideId/signaler", async (req, reply) => {
     [id("sig"), req.params.rideId, auteur, message.trim().slice(0, 500)]
   );
   return reply.code(201).send({ enregistre: true });
+});
+
+// Le client conteste l'arrivée annoncée par le chauffeur ("il n'est pas encore là")
+app.post("/api/rides/:rideId/contester-arrivee", async (req, reply) => {
+  const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
+  const ride = existant[0];
+  if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
+  if (!ride.chauffeur_arrive_le) {
+    return reply.code(409).send({ erreur: "Aucune arrivée déclarée à contester pour cette course." });
+  }
+
+  await pool.query(
+    `INSERT INTO signalements (id, ride_id, auteur, message) VALUES ($1,$2,'client',$3)`,
+    [id("sig"), req.params.rideId, "Le client conteste l'arrivée annoncée par le chauffeur : il ne serait pas encore sur place."]
+  );
+
+  if (ride.chauffeur_id) {
+    notifierChauffeur(ride.chauffeur_id, {
+      titre: "Le client conteste votre arrivée",
+      corps: "Le client indique que vous n'êtes pas encore sur place.",
+      rideId: req.params.rideId,
+      role: "chauffeur",
+    }).catch(() => {});
+  }
+
+  return { enregistre: true };
 });
 
 app.get("/api/admin/signalements", async (req, reply) => {

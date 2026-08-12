@@ -63,6 +63,7 @@ export const api = {
   clientNeConfirmePas: (id, token) => request(`/api/rides/${id}/client-ne-confirme-pas`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
   annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
+  contesterArrivee: (id) => request(`/api/rides/${id}/contester-arrivee`, { method: "POST" }),
   signaler: (id, auteur, message) =>
     request(`/api/rides/${id}/signaler`, { method: "POST", body: JSON.stringify({ auteur, message }) }),
   solde: (chauffeurId, token) =>
@@ -92,7 +93,8 @@ export const api = {
     request("/api/push/abonner-chauffeur", { method: "POST", body: JSON.stringify({ subscription }), headers: { Authorization: `Bearer ${token}` } }),
   pushAbonnerCourse: (rideId, subscription) =>
     request(`/api/push/abonner-course/${rideId}`, { method: "POST", body: JSON.stringify({ subscription }) }),
-  arriveeClient: (id, token) => request(`/api/rides/${id}/arrivee-client`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  arriveeClient: (id, token, position) =>
+    request(`/api/rides/${id}/arrivee-client`, { method: "POST", body: JSON.stringify({ position }), headers: { Authorization: `Bearer ${token}` } }),
   arriveeDestination: (id, token) => request(`/api/rides/${id}/arrivee-destination`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   relancerClient: (id, token) => request(`/api/rides/${id}/relancer-client`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   inscriptionClient: (payload) => request("/api/clients/inscription", { method: "POST", body: JSON.stringify(payload) }),

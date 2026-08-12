@@ -257,7 +257,7 @@ export default function AdminView({ onToast }) {
               <div key={s.id} className="card" style={{ padding: 14 }}>
                 <p className="card__hint" style={{ marginBottom: 6 }}>
                   <span className="pill" style={{ background: "var(--color-danger-tint)", color: "var(--color-danger)" }}>
-                    {s.auteur === "client" ? "Signalé par le client" : "Signalé par le chauffeur"}
+                    {s.auteur === "client" ? "Signalé par le client" : s.auteur === "chauffeur" ? "Signalé par le chauffeur" : "⚠ Détection automatique"}
                   </span>
                   {" "}· {s.zoneDepart} → {s.zoneArrivee} · {s.clientNom}
                 </p>

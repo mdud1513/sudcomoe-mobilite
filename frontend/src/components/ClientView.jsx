@@ -6,6 +6,16 @@ import ClientHistory from "./ClientHistory.jsx";
 import MapPicker from "./MapPicker.jsx";
 import { abonnerCourse } from "../push.js";
 
+function distanceKmEntre(a, b) {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
 const CLE_SESSION_CLIENT = "scm_client_session";
 const CLE_COURSE_EN_COURS = "scm_course_en_cours";
 
@@ -347,8 +357,24 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
         {course.statut === "confirmee" && course.chauffeurArriveLe && (
           <div style={{ marginTop: 16 }}>
             <p className="card__hint" style={{ textAlign: "center", fontWeight: 600, color: "var(--color-primary-deep)" }}>
-              🚗 Votre chauffeur est arrivé — il vous attend au point de prise en charge.
+              {course.position && course.chauffeurPositionArrivee && distanceKmEntre(course.position, course.chauffeurPositionArrivee) <= 0.05
+                ? "✅ Votre chauffeur est arrivé — position vérifiée, il est bien sur place."
+                : "🚗 Votre chauffeur est arrivé — il vous attend au point de prise en charge."}
             </p>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await api.contesterArrivee(course.id);
+                  onToast("Signalement envoyé — l'équipe et le chauffeur ont été notifiés.");
+                } catch (err) {
+                  onToast(err.message);
+                }
+              }}
+              style={{ border: "none", background: "transparent", color: "var(--color-danger)", fontSize: 12.5, fontWeight: 600, padding: "8px 0 0", cursor: "pointer", display: "block", margin: "0 auto" }}
+            >
+              Il n'est pas encore là ?
+            </button>
           </div>
         )}
 

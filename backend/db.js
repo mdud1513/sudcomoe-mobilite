@@ -125,6 +125,7 @@ export async function initDb() {
   `);
 
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_arrive_le TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_position_arrivee JSONB;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrivee_destination_le TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS derniere_relance_le TIMESTAMPTZ;`);
 
