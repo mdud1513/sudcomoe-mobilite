@@ -1,0 +1,21 @@
+{
+  "name": "Scotrans Admin",
+  "short_name": "Scotrans Admin",
+  "description": "Taxi sécurisé à Yaou, Bonoua, Samo et Grand-Bassam",
+  "start_url": "/?admin",
+  "display": "standalone",
+  "background_color": "#F6EFE4",
+  "theme_color": "#0A3A3E",
+  "icons": [
+    {
+      "src": "/icon-192-admin.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512-admin.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

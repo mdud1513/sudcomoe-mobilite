@@ -5,14 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Scotrans</title>
     <meta name="description" content="Taxi sécurisé à Yaou, Bonoua, Samo et Grand-Bassam" />
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="/manifest.json" id="lien-manifeste" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <meta name="theme-color" content="#0F5257" />
+    <link rel="icon" href="/favicon.png" id="lien-favicon" />
+    <link rel="apple-touch-icon" href="/icon-192.png" id="lien-apple-icon" />
+    <meta name="theme-color" content="#0F5257" id="meta-theme-color" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var role = params.has("admin") ? "admin" : params.get("role");
+        if (role !== "client" && role !== "chauffeur" && role !== "admin") return;
+
+        var noms = { client: "Scotrans Client", chauffeur: "Scotrans Chauffeur", admin: "Scotrans Admin" };
+        var themes = { client: "#0F5257", chauffeur: "#0F5257", admin: "#0A3A3E" };
+
+        document.title = noms[role];
+        document.getElementById("lien-manifeste").href = "/manifest-" + role + ".json";
+        document.getElementById("lien-favicon").href = "/icon-192-" + role + ".png";
+        document.getElementById("lien-apple-icon").href = "/icon-192-" + role + ".png";
+        document.getElementById("meta-theme-color").content = themes[role];
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
