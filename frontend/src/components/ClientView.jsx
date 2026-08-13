@@ -38,9 +38,11 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
   });
   const [afficherAuth, setAfficherAuth] = useState(false);
   const [afficherHistorique, setAfficherHistorique] = useState(false);
-  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", adresseArrivee: "", nombrePassagers: 1 });
-  const [position, setPosition] = useState(null); // { lat, lng } une fois localisé
+  const [form, setForm] = useState({ clientNom: "", clientTelephone: "", zoneDepart: zones[0] || "", zoneArrivee: zones[1] || zones[0] || "", adresseArrivee: "", adresseDepart: "", nombrePassagers: 1 });
+  const [position, setPosition] = useState(null); // { lat, lng } une fois localisé (départ)
   const [localisation, setLocalisation] = useState("inactif"); // inactif | en_cours | ok | refuse
+  const [positionArrivee, setPositionArrivee] = useState(null); // { lat, lng } pour une arrivée hors des 4 zones
+  const [localisationArrivee, setLocalisationArrivee] = useState("inactif");
   const [arrets, setArrets] = useState([]); // jusqu'à 3 points de collecte supplémentaires
   const [estimation, setEstimation] = useState(null);
   const [estimationEnCours, setEstimationEnCours] = useState(false);
@@ -97,7 +99,8 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
   }, [course?.id, course?.statut]);
 
   useEffect(() => {
-    const nbArretsRequis = Math.max(0, Math.min(3, form.nombrePassagers - 1));
+    const zoneLibre = form.zoneDepart === "Autre" || form.zoneArrivee === "Autre";
+    const nbArretsRequis = zoneLibre ? 0 : Math.max(0, Math.min(3, form.nombrePassagers - 1));
     setArrets((prev) => {
       const next = prev.slice(0, nbArretsRequis);
       while (next.length < nbArretsRequis) {
@@ -106,7 +109,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.nombrePassagers]);
+  }, [form.nombrePassagers, form.zoneDepart, form.zoneArrivee]);
 
   function majArret(index, champ, valeur) {
     setArrets((prev) => prev.map((a, i) => (i === index ? { ...a, [champ]: valeur } : a)));
@@ -169,6 +172,8 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
   const arretsZonesCle = arrets.map((a) => a.zone).join(",");
   useEffect(() => {
     if (!form.zoneDepart || !form.zoneArrivee) return;
+    if (form.zoneDepart === "Autre" && !position) { setEstimation(null); return; }
+    if (form.zoneArrivee === "Autre" && !positionArrivee) { setEstimation(null); return; }
     let annule = false;
     setEstimationEnCours(true);
     const delai = setTimeout(async () => {
@@ -178,6 +183,8 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
           zoneArrivee: form.zoneArrivee,
           nombrePassagers: form.nombrePassagers,
           arrets,
+          positionDepart: form.zoneDepart === "Autre" ? position : null,
+          positionArrivee: form.zoneArrivee === "Autre" ? positionArrivee : null,
         });
         if (!annule) setEstimation(devis);
       } catch {
@@ -191,7 +198,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
       clearTimeout(delai);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.zoneDepart, form.zoneArrivee, form.nombrePassagers, arretsZonesCle]);
+  }, [form.zoneDepart, form.zoneArrivee, form.nombrePassagers, arretsZonesCle, position, positionArrivee]);
 
   function localiser() {
     if (!navigator.geolocation) {
@@ -212,13 +219,40 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
     );
   }
 
+  function localiserArrivee() {
+    if (!navigator.geolocation) {
+      onToast("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setLocalisationArrivee("en_cours");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPositionArrivee({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocalisationArrivee("ok");
+      },
+      () => {
+        setLocalisationArrivee("refuse");
+        onToast("Position d'arrivée non partagée — choisissez-la plutôt sur la carte.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.clientNom || !form.clientTelephone) {
       onToast("Indiquez votre nom et votre numéro.");
       return;
     }
-    if (form.zoneDepart === form.zoneArrivee) {
+    if (form.zoneDepart === "Autre" && !position) {
+      onToast("Précisez votre position de départ sur la carte ou via votre position actuelle.");
+      return;
+    }
+    if (form.zoneArrivee === "Autre" && !positionArrivee) {
+      onToast("Précisez la position d'arrivée sur la carte ou via votre position actuelle.");
+      return;
+    }
+    if (form.zoneDepart === form.zoneArrivee && form.zoneDepart !== "Autre") {
       onToast("Course locale enregistrée : départ et arrivée dans la même zone.");
     }
     setLoading(true);
@@ -227,6 +261,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
         {
           ...form,
           position,
+          positionArrivee,
           arrets: arrets.map((a) => ({ nom: a.nom, zone: a.zone, lieu: a.lieu, position: a.position })),
         },
         session?.token
@@ -305,6 +340,8 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
     const centre =
       carteOuverte === "principale"
         ? CENTRE_ZONES[form.zoneDepart] || CENTRE_ZONES.Yaou
+        : carteOuverte === "destination"
+        ? CENTRE_ZONES[form.zoneArrivee] || CENTRE_ZONES.Yaou
         : CENTRE_ZONES[arrets[carteOuverte]?.zone] || CENTRE_ZONES.Yaou;
     return (
       <MapPicker
@@ -314,6 +351,9 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
           if (carteOuverte === "principale") {
             setPosition(pos);
             setLocalisation("ok");
+          } else if (carteOuverte === "destination") {
+            setPositionArrivee(pos);
+            setLocalisationArrivee("ok");
           } else {
             majArret(carteOuverte, "position", pos);
             majArret(carteOuverte, "localisation", "ok");
@@ -466,6 +506,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
           <label htmlFor="zoneDepart">Départ</label>
           <select id="zoneDepart" value={form.zoneDepart} onChange={handleChange("zoneDepart")}>
             {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+            <option value="Autre">Autre (préciser sur la carte)</option>
           </select>
         </div>
         <div className="route-row__arrow">→</div>
@@ -473,9 +514,22 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
           <label htmlFor="zoneArrivee">Arrivée</label>
           <select id="zoneArrivee" value={form.zoneArrivee} onChange={handleChange("zoneArrivee")}>
             {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+            <option value="Autre">Autre (préciser sur la carte)</option>
           </select>
         </div>
       </div>
+
+      {form.zoneDepart === "Autre" && (
+        <div className="field">
+          <label htmlFor="adresseDepart">Lieu de départ (facultatif)</label>
+          <input
+            id="adresseDepart"
+            value={form.adresseDepart}
+            onChange={handleChange("adresseDepart")}
+            placeholder="Ex. Devant la station-service, quartier..."
+          />
+        </div>
+      )}
 
       <div className="field">
         <label htmlFor="adresseArrivee">Adresse précise d'arrivée (facultatif)</label>
@@ -533,7 +587,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
       </div>
 
       <div className="field" style={{ marginBottom: 0 }}>
-        <label>Position précise (facultatif)</label>
+        <label>Position précise de départ {form.zoneDepart === "Autre" ? "(requise)" : "(facultatif)"}</label>
         <div className="btn-row">
           <button
             type="button"
@@ -553,9 +607,38 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
           </button>
         </div>
         <p className="card__hint" style={{ marginTop: 6, marginBottom: 0 }}>
-          Aide le chauffeur à vous retrouver précisément, en plus de la zone choisie ci-dessus.
+          {form.zoneDepart === "Autre"
+            ? "Obligatoire : sans position précise, impossible de calculer un tarif hors des 4 zones habituelles."
+            : "Aide le chauffeur à vous retrouver précisément, en plus de la zone choisie ci-dessus."}
         </p>
       </div>
+
+      {form.zoneArrivee === "Autre" && (
+        <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
+          <label>Position précise d'arrivée (requise)</label>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn btn--outline"
+              onClick={localiserArrivee}
+              disabled={localisationArrivee === "en_cours"}
+              style={{ marginTop: 2 }}
+            >
+              {localisationArrivee === "ok"
+                ? "📍 Position partagée"
+                : localisationArrivee === "en_cours"
+                ? "Localisation…"
+                : "📍 Ma position actuelle"}
+            </button>
+            <button type="button" className="btn btn--outline" onClick={() => setCarteOuverte("destination")} style={{ marginTop: 2 }}>
+              🗺️ Choisir sur la carte
+            </button>
+          </div>
+          <p className="card__hint" style={{ marginTop: 6, marginBottom: 0 }}>
+            Obligatoire : sans position précise, impossible de calculer un tarif hors des 4 zones habituelles.
+          </p>
+        </div>
+      )}
 
       {arrets.length > 0 && (
         <>

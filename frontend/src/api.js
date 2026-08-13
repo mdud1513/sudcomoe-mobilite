@@ -40,9 +40,11 @@ async function request(path, options = {}, tentative = 0) {
 
 export const api = {
   zones: () => request("/api/zones"),
-  devis: ({ zoneDepart, zoneArrivee, nombrePassagers, arrets }) =>
+  devis: ({ zoneDepart, zoneArrivee, nombrePassagers, arrets, positionDepart, positionArrivee }) =>
     request(
-      `/api/devis?zoneDepart=${encodeURIComponent(zoneDepart)}&zoneArrivee=${encodeURIComponent(zoneArrivee)}&nombrePassagers=${nombrePassagers}&arrets=${encodeURIComponent(JSON.stringify((arrets || []).map((a) => ({ zone: a.zone }))))}`
+      `/api/devis?zoneDepart=${encodeURIComponent(zoneDepart)}&zoneArrivee=${encodeURIComponent(zoneArrivee)}&nombrePassagers=${nombrePassagers}&arrets=${encodeURIComponent(JSON.stringify((arrets || []).map((a) => ({ zone: a.zone }))))}` +
+        (positionDepart ? `&positionDepart=${encodeURIComponent(JSON.stringify(positionDepart))}` : "") +
+        (positionArrivee ? `&positionArrivee=${encodeURIComponent(JSON.stringify(positionArrivee))}` : "")
     ),
   chauffeurs: () => request("/api/chauffeurs"),
   creerCourse: (payload, token) =>

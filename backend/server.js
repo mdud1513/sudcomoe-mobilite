@@ -59,15 +59,44 @@ const DISTANCE_LOCALE_KM = 2; // estimation moyenne pour un trajet intra-zone (p
 const VITESSE_MOYENNE_KMH = 25; // moyenne prudente en zone locale (routes, arrêts, circulation)
 const TEMPS_PREPARATION_MIN = 3; // délai avant que le chauffeur ne prenne réellement la route
 
-function estimerTempsAttente(zoneChauffeur, zoneDepart) {
-  const distance = zoneChauffeur === zoneDepart ? DISTANCE_LOCALE_KM : distanceKm(zoneChauffeur, zoneDepart);
+const ZONE_AUTRE = "Autre";
+
+// Renvoie les coordonnées d'un point : celles de la zone si elle est connue, sinon la position
+// personnalisée fournie (obligatoire quand la zone vaut "Autre"). Renvoie null si indéterminable.
+function pointDeZone(zone, positionPersonnalisee) {
+  if (zone !== ZONE_AUTRE) return ZONE_COORDS[zone] || null;
+  if (positionPersonnalisee && typeof positionPersonnalisee.lat === "number" && typeof positionPersonnalisee.lng === "number") {
+    return positionPersonnalisee;
+  }
+  return null;
+}
+
+function estimerTempsAttente(zoneChauffeur, zoneDepart, positionDepart) {
+  const pointChauffeur = pointDeZone(zoneChauffeur, null);
+  const pointDepart = pointDeZone(zoneDepart, positionDepart);
+  const distance =
+    zoneChauffeur === zoneDepart && zoneDepart !== ZONE_AUTRE
+      ? DISTANCE_LOCALE_KM
+      : pointChauffeur && pointDepart
+      ? distanceEntrePoints(pointChauffeur, pointDepart)
+      : 8; // repli raisonnable si un point personnalisé venait à manquer
   const minutes = Math.round((distance / VITESSE_MOYENNE_KMH) * 60) + TEMPS_PREPARATION_MIN;
   return minutes;
 }
 
-function tarif(zoneDepart, zoneArrivee, nombrePassagers) {
+function tarif(zoneDepart, zoneArrivee, nombrePassagers, positionDepart, positionArrivee) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
-  const distance = zoneDepart === zoneArrivee ? DISTANCE_LOCALE_KM : distanceKm(zoneDepart, zoneArrivee);
+
+  let distance;
+  if (zoneDepart === zoneArrivee && zoneDepart !== ZONE_AUTRE) {
+    distance = DISTANCE_LOCALE_KM;
+  } else {
+    const pointA = pointDeZone(zoneDepart, positionDepart);
+    const pointB = pointDeZone(zoneArrivee, positionArrivee);
+    if (!pointA || !pointB) return null; // position personnalisée manquante : impossible de tarifer
+    distance = distanceEntrePoints(pointA, pointB);
+  }
+
   const montant = arrondir50(Math.max(TARIF_MINIMUM, distance * PRIX_PAR_KM) * facteurPassagers(n));
   return { montant, distanceKm: Math.round(distance * 10) / 10 };
 }
@@ -531,6 +560,8 @@ function versRideDTO(row, chauffeur) {
     zoneDepart: row.zone_depart,
     zoneArrivee: row.zone_arrivee,
     adresseArrivee: row.adresse_arrivee,
+    adresseDepart: row.adresse_depart,
+    positionArrivee: row.position_arrivee,
     nombrePassagers: row.nombre_passagers,
     position: row.position,
     arrets: row.arrets,
@@ -558,12 +589,31 @@ function versRideDTO(row, chauffeur) {
 
 // Estimation du prix avant de valider la demande — ne crée aucune course
 app.get("/api/devis", async (req, reply) => {
-  const { zoneDepart, zoneArrivee, nombrePassagers, arrets } = req.query;
+  const { zoneDepart, zoneArrivee, nombrePassagers, arrets, positionDepart, positionArrivee } = req.query;
   if (!zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "zoneDepart et zoneArrivee sont requis." });
   }
-  if (!ZONES.includes(zoneDepart) || !ZONES.includes(zoneArrivee)) {
-    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${ZONES.join(", ")}.` });
+  const zonesValides = [...ZONES, ZONE_AUTRE];
+  if (!zonesValides.includes(zoneDepart) || !zonesValides.includes(zoneArrivee)) {
+    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${zonesValides.join(", ")}.` });
+  }
+
+  const parsePosition = (brut) => {
+    try {
+      const p = JSON.parse(brut);
+      return p && typeof p.lat === "number" && typeof p.lng === "number" ? p : null;
+    } catch {
+      return null;
+    }
+  };
+  const posDepart = positionDepart ? parsePosition(positionDepart) : null;
+  const posArrivee = positionArrivee ? parsePosition(positionArrivee) : null;
+
+  if (zoneDepart === ZONE_AUTRE && !posDepart) {
+    return reply.code(400).send({ erreur: "Précisez la position exacte de départ sur la carte." });
+  }
+  if (zoneArrivee === ZONE_AUTRE && !posArrivee) {
+    return reply.code(400).send({ erreur: "Précisez la position exacte d'arrivée sur la carte." });
   }
 
   let arretsZones = [];
@@ -578,8 +628,13 @@ app.get("/api/devis", async (req, reply) => {
     }
   }
 
-  const { montant: tarifBase, distanceKm: distanceTrajet } = tarif(zoneDepart, zoneArrivee, nombrePassagers);
-  const supplement = supplementArrets(zoneDepart, zoneArrivee, arretsZones);
+  const resultatTarif = tarif(zoneDepart, zoneArrivee, nombrePassagers, posDepart, posArrivee);
+  if (!resultatTarif) {
+    return reply.code(400).send({ erreur: "Impossible de calculer un tarif avec les positions fournies." });
+  }
+  const { montant: tarifBase, distanceKm: distanceTrajet } = resultatTarif;
+  const supplement =
+    zoneDepart !== ZONE_AUTRE && zoneArrivee !== ZONE_AUTRE ? supplementArrets(zoneDepart, zoneArrivee, arretsZones) : { total: 0, details: [] };
 
   return {
     distanceKm: distanceTrajet,
@@ -591,30 +646,51 @@ app.get("/api/devis", async (req, reply) => {
 });
 
 app.post("/api/rides", async (req, reply) => {
-  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, nombrePassagers, position, arrets } =
+  const { clientNom, clientTelephone, zoneDepart, zoneArrivee, adresseArrivee, adresseDepart, nombrePassagers, position, positionArrivee, arrets } =
     req.body || {};
   if (!clientNom || !clientTelephone || !zoneDepart || !zoneArrivee) {
     return reply.code(400).send({ erreur: "clientNom, clientTelephone, zoneDepart et zoneArrivee sont requis." });
+  }
+  const zonesValides = [...ZONES, ZONE_AUTRE];
+  if (!zonesValides.includes(zoneDepart) || !zonesValides.includes(zoneArrivee)) {
+    return reply.code(400).send({ erreur: `Zone inconnue. Zones valides : ${zonesValides.join(", ")}.` });
   }
   const clientConnecte = await clientOptionnel(req); // rattachement facultatif à un compte client
   const passagers = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
   const positionValide =
     position && typeof position.lat === "number" && typeof position.lng === "number" ? position : null;
+  const positionArriveeValide =
+    positionArrivee && typeof positionArrivee.lat === "number" && typeof positionArrivee.lng === "number"
+      ? positionArrivee
+      : null;
 
-  const arretsValides = Array.isArray(arrets)
-    ? arrets.slice(0, 3).map((a) => ({
-        nom: typeof a?.nom === "string" ? a.nom.slice(0, 60) : "",
-        zone: ZONES.includes(a?.zone) ? a.zone : zoneDepart,
-        lieu: typeof a?.lieu === "string" ? a.lieu.slice(0, 100) : "",
-        position:
-          a?.position && typeof a.position.lat === "number" && typeof a.position.lng === "number"
-            ? a.position
-            : null,
-      }))
-    : [];
+  if (zoneDepart === ZONE_AUTRE && !positionValide) {
+    return reply.code(400).send({ erreur: "Précisez votre position exacte de départ sur la carte (zone \"Autre\")." });
+  }
+  if (zoneArrivee === ZONE_AUTRE && !positionArriveeValide) {
+    return reply.code(400).send({ erreur: "Précisez la position exacte d'arrivée sur la carte (zone \"Autre\")." });
+  }
 
-  const { montant: tarifBase, distanceKm: distanceTrajet } = tarif(zoneDepart, zoneArrivee, passagers);
-  const supplement = supplementArrets(zoneDepart, zoneArrivee, arretsValides);
+  const arretsValides =
+    zoneDepart !== ZONE_AUTRE && zoneArrivee !== ZONE_AUTRE && Array.isArray(arrets)
+      ? arrets.slice(0, 3).map((a) => ({
+          nom: typeof a?.nom === "string" ? a.nom.slice(0, 60) : "",
+          zone: ZONES.includes(a?.zone) ? a.zone : zoneDepart,
+          lieu: typeof a?.lieu === "string" ? a.lieu.slice(0, 100) : "",
+          position:
+            a?.position && typeof a.position.lat === "number" && typeof a.position.lng === "number"
+              ? a.position
+              : null,
+        }))
+      : []; // pas d'arrêts multi-passagers possibles avec une zone "Autre" (calcul de détour non applicable)
+
+  const resultatTarif = tarif(zoneDepart, zoneArrivee, passagers, positionValide, positionArriveeValide);
+  if (!resultatTarif) {
+    return reply.code(400).send({ erreur: "Impossible de calculer un tarif avec les positions fournies." });
+  }
+  const { montant: tarifBase, distanceKm: distanceTrajet } = resultatTarif;
+  const supplement =
+    zoneDepart !== ZONE_AUTRE && zoneArrivee !== ZONE_AUTRE ? supplementArrets(zoneDepart, zoneArrivee, arretsValides) : { total: 0, details: [] };
   const arretsAvecDetail = arretsValides.map((a) => {
     const detail = supplement.details.find((d) => d.zone === a.zone);
     return { ...a, distanceKm: detail?.distanceKm ?? null, surLeChemin: detail?.surLeChemin ?? true };
@@ -625,9 +701,9 @@ app.post("/api/rides", async (req, reply) => {
 
   const { rows } = await pool.query(
     `INSERT INTO rides
-      (id, client_nom, client_telephone, zone_depart, zone_arrivee, adresse_arrivee, nombre_passagers,
-       position, arrets, distance_km, tarif_base, supplement_arrets, montant, statut, historique, client_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'demandee',$14,$15)
+      (id, client_nom, client_telephone, zone_depart, zone_arrivee, adresse_arrivee, adresse_depart, nombre_passagers,
+       position, position_arrivee, arrets, distance_km, tarif_base, supplement_arrets, montant, statut, historique, client_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'demandee',$16,$17)
      RETURNING *`,
     [
       rideId,
@@ -636,8 +712,10 @@ app.post("/api/rides", async (req, reply) => {
       zoneDepart,
       zoneArrivee,
       typeof adresseArrivee === "string" ? adresseArrivee.slice(0, 150) : "",
+      typeof adresseDepart === "string" ? adresseDepart.slice(0, 150) : "",
       passagers,
       positionValide ? JSON.stringify(positionValide) : null,
+      positionArriveeValide ? JSON.stringify(positionArriveeValide) : null,
       JSON.stringify(arretsAvecDetail),
       distanceTrajet,
       tarifBase,
@@ -729,7 +807,7 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
     return reply.code(409).send({ erreur: "Cette course n'est plus disponible." });
   }
 
-  const tempsAttente = estimerTempsAttente(chauffeur.zone, rows[0].zone_depart);
+  const tempsAttente = estimerTempsAttente(chauffeur.zone, rows[0].zone_depart, rows[0].position);
   const heureArrivee = new Date(Date.now() + tempsAttente * 60000);
   const { rows: rowsFinal } = await pool.query(
     `UPDATE rides SET temps_attente_minutes = $1, heure_arrivee_estimee = $2 WHERE id = $3 RETURNING *`,

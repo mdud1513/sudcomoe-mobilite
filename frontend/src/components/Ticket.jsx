@@ -53,6 +53,11 @@ export default function Ticket({ course, children, contact, role, onToast }) {
           {typeof course.distanceKm === "number" ? ` · ≈ ${course.distanceKm} km` : ""}
           {course.chauffeur ? ` · Chauffeur : ${course.chauffeur.nom} (${course.chauffeur.badge})` : ""}
         </div>
+        {course.adresseDepart && (
+          <div className="ticket__meta" style={{ marginTop: 2 }}>
+            📍 Départ : {course.adresseDepart}
+          </div>
+        )}
         {course.adresseArrivee && (
           <div className="ticket__meta" style={{ marginTop: 2 }}>
             🏁 {course.adresseArrivee}
@@ -66,7 +71,18 @@ export default function Ticket({ course, children, contact, role, onToast }) {
             className="pill"
             style={{ display: "inline-block", marginTop: 8, marginRight: 6, textDecoration: "none" }}
           >
-            📍 Position du client
+            📍 Position de départ
+          </a>
+        )}
+        {course.positionArrivee && (
+          <a
+            href={`https://www.google.com/maps?q=${course.positionArrivee.lat},${course.positionArrivee.lng}`}
+            target="_blank"
+            rel="noreferrer"
+            className="pill"
+            style={{ display: "inline-block", marginTop: 8, marginRight: 6, textDecoration: "none" }}
+          >
+            🏁 Position d'arrivée
           </a>
         )}
         {course.arrets && course.arrets.length > 0 && (

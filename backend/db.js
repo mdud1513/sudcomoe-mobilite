@@ -75,6 +75,8 @@ export async function initDb() {
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS temps_attente_minutes INT;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS heure_arrivee_estimee TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeurs_refuses JSONB NOT NULL DEFAULT '[]';`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS position_arrivee JSONB;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS adresse_depart TEXT;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (
