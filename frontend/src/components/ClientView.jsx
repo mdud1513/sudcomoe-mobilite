@@ -346,17 +346,21 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
     return (
       <MapPicker
         centreInitial={centre}
+        rechercheInitiale={carteOuverte === "principale" ? form.adresseDepart : carteOuverte === "destination" ? form.adresseArrivee : ""}
         onAnnuler={() => setCarteOuverte(null)}
-        onValider={(pos) => {
+        onValider={(pos, texteRecherche) => {
           if (carteOuverte === "principale") {
             setPosition(pos);
             setLocalisation("ok");
+            if (texteRecherche) setForm((f) => ({ ...f, adresseDepart: texteRecherche }));
           } else if (carteOuverte === "destination") {
             setPositionArrivee(pos);
             setLocalisationArrivee("ok");
+            if (texteRecherche) setForm((f) => ({ ...f, adresseArrivee: texteRecherche }));
           } else {
             majArret(carteOuverte, "position", pos);
             majArret(carteOuverte, "localisation", "ok");
+            if (texteRecherche) majArret(carteOuverte, "lieu", texteRecherche);
           }
           setCarteOuverte(null);
           onToast("Position enregistrée.");
