@@ -107,4 +107,15 @@ export const api = {
     request("/api/clients/moi/adresses", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
   supprimerAdresseFavorite: (index, token) =>
     request(`/api/clients/moi/adresses/${index}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
+  adminCreerSyndicat: (payload, token) =>
+    request("/api/admin/syndicats", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
+  adminListeSyndicats: (token) =>
+    request("/api/admin/syndicats", { headers: { Authorization: `Bearer ${token}` } }),
+  adminBasculerSyndicat: (id, token) =>
+    request(`/api/admin/syndicats/${id}/desactiver`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  connexionSyndicat: (payload) => request("/api/syndicats/connexion", { method: "POST", body: JSON.stringify(payload) }),
+  syndicatCotisations: (token, jour) =>
+    request(`/api/syndicats/moi/cotisations${jour ? `?jour=${jour}` : ""}`, { headers: { Authorization: `Bearer ${token}` } }),
+  syndicatMarquerPaye: (cotisationId, token) =>
+    request(`/api/syndicats/cotisations/${cotisationId}/marquer-paye`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
 };

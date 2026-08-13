@@ -115,6 +115,35 @@ export async function initDb() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS syndicats (
+      id TEXT PRIMARY KEY,
+      nom TEXT NOT NULL,
+      zone_a TEXT NOT NULL,
+      zone_b TEXT NOT NULL,
+      tarif_jour INT NOT NULL,
+      telephone TEXT UNIQUE NOT NULL,
+      code_pin_hash TEXT NOT NULL,
+      token TEXT,
+      actif BOOLEAN NOT NULL DEFAULT true,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cotisations (
+      id TEXT PRIMARY KEY,
+      syndicat_id TEXT NOT NULL REFERENCES syndicats(id),
+      chauffeur_id TEXT NOT NULL REFERENCES chauffeurs(id),
+      jour DATE NOT NULL,
+      montant INT NOT NULL,
+      paye BOOLEAN NOT NULL DEFAULT false,
+      paye_le TIMESTAMPTZ,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (syndicat_id, chauffeur_id, jour)
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       id TEXT PRIMARY KEY,
       chauffeur_id TEXT REFERENCES chauffeurs(id),

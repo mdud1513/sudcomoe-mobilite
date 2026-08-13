@@ -4,7 +4,7 @@ import AdminLogin from "./AdminLogin.jsx";
 
 const CLE_SESSION = "scm_admin_session";
 
-export default function AdminView({ onToast }) {
+export default function AdminView({ onToast, zones }) {
   const [session, setSession] = useState(() => {
     try {
       const brut = localStorage.getItem(CLE_SESSION);
@@ -16,9 +16,12 @@ export default function AdminView({ onToast }) {
   const [chauffeurs, setChauffeurs] = useState([]);
   const [stats, setStats] = useState(null);
   const [signalements, setSignalements] = useState([]);
+  const [syndicats, setSyndicats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [inviter, setInviter] = useState(false);
   const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
+  const [nouveauSyndicat, setNouveauSyndicat] = useState(false);
+  const [formSyndicat, setFormSyndicat] = useState({ nom: "", zoneA: "", zoneB: "", tarifJour: "", telephone: "", codePin: "" });
 
   function connecte(nouvelleSession) {
     localStorage.setItem(CLE_SESSION, JSON.stringify(nouvelleSession));
@@ -32,10 +35,11 @@ export default function AdminView({ onToast }) {
   }
 
   async function charger() {
-    const [resultatChauffeurs, resultatStats, resultatSignalements] = await Promise.allSettled([
+    const [resultatChauffeurs, resultatStats, resultatSignalements, resultatSyndicats] = await Promise.allSettled([
       api.chauffeurs(),
       api.adminStatistiques(session.token),
       api.adminSignalements(session.token),
+      api.adminListeSyndicats(session.token),
     ]);
 
     if (resultatChauffeurs.status === "fulfilled") {
@@ -54,6 +58,10 @@ export default function AdminView({ onToast }) {
 
     if (resultatSignalements.status === "fulfilled") {
       setSignalements(resultatSignalements.value);
+    }
+
+    if (resultatSyndicats.status === "fulfilled") {
+      setSyndicats(resultatSyndicats.value);
     }
 
     setLoading(false);
@@ -102,6 +110,37 @@ export default function AdminView({ onToast }) {
   async function marquerTraite(id) {
     try {
       await api.traiterSignalement(id, session.token);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function creerSyndicat(e) {
+    e.preventDefault();
+    const { nom, zoneA, zoneB, tarifJour, telephone, codePin } = formSyndicat;
+    if (!nom || !zoneA || !zoneB || !tarifJour || !telephone || !/^\d{4}$/.test(codePin)) {
+      onToast("Tous les champs sont requis, code à 4 chiffres.");
+      return;
+    }
+    if (zoneA === zoneB) {
+      onToast("Les deux zones de l'axe doivent être différentes.");
+      return;
+    }
+    try {
+      await api.adminCreerSyndicat({ ...formSyndicat, tarifJour: parseInt(tarifJour, 10) }, session.token);
+      onToast(`Syndicat "${nom}" créé — communiquez le ${telephone} et le code ${codePin} à son représentant.`);
+      setFormSyndicat({ nom: "", zoneA: "", zoneB: "", tarifJour: "", telephone: "", codePin: "" });
+      setNouveauSyndicat(false);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function basculerSyndicat(id) {
+    try {
+      await api.adminBasculerSyndicat(id, session.token);
       charger();
     } catch (err) {
       onToast(err.message);
@@ -269,6 +308,85 @@ export default function AdminView({ onToast }) {
             ))}
           </div>
         </>
+      )}
+
+      <div style={{ height: 20 }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <p className="section-label" style={{ marginBottom: 0 }}>Syndicats partenaires ({syndicats.length})</p>
+        <button
+          onClick={() => setNouveauSyndicat((v) => !v)}
+          style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12.5, fontWeight: 600, padding: "6px 8px" }}
+        >
+          {nouveauSyndicat ? "Annuler" : "+ Nouvel accord"}
+        </button>
+      </div>
+      <div style={{ height: 8 }} />
+
+      {nouveauSyndicat && (
+        <form className="card" onSubmit={creerSyndicat} style={{ marginBottom: 12 }}>
+          <div className="field">
+            <label htmlFor="synd-nom">Nom du syndicat</label>
+            <input id="synd-nom" value={formSyndicat.nom} onChange={(e) => setFormSyndicat((f) => ({ ...f, nom: e.target.value }))} placeholder="Ex. Syndicat Yaou-Bassam" />
+          </div>
+          <div className="route-row">
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="synd-zoneA">Zone A</label>
+              <select id="synd-zoneA" value={formSyndicat.zoneA} onChange={(e) => setFormSyndicat((f) => ({ ...f, zoneA: e.target.value }))}>
+                <option value="">—</option>
+                {(zones || []).map((z) => <option key={z} value={z}>{z}</option>)}
+              </select>
+            </div>
+            <div className="route-row__arrow">↔</div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="synd-zoneB">Zone B</label>
+              <select id="synd-zoneB" value={formSyndicat.zoneB} onChange={(e) => setFormSyndicat((f) => ({ ...f, zoneB: e.target.value }))}>
+                <option value="">—</option>
+                {(zones || []).map((z) => <option key={z} value={z}>{z}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="synd-tarif">Tarif forfaitaire journalier (FCFA, par chauffeur)</label>
+            <input id="synd-tarif" type="number" min="0" value={formSyndicat.tarifJour} onChange={(e) => setFormSyndicat((f) => ({ ...f, tarifJour: e.target.value }))} placeholder="Ex. 1500" />
+          </div>
+          <div className="field">
+            <label htmlFor="synd-tel">Téléphone du représentant (identifiant de connexion)</label>
+            <input id="synd-tel" value={formSyndicat.telephone} onChange={(e) => setFormSyndicat((f) => ({ ...f, telephone: e.target.value }))} placeholder="07 00 00 00 00" />
+          </div>
+          <div className="field">
+            <label htmlFor="synd-pin">Code à 4 chiffres (à communiquer au représentant)</label>
+            <input id="synd-pin" inputMode="numeric" maxLength={4} value={formSyndicat.codePin} onChange={(e) => setFormSyndicat((f) => ({ ...f, codePin: e.target.value.replace(/\D/g, "").slice(0, 4) }))} placeholder="••••" />
+          </div>
+          <button className="btn btn--primary" type="submit">Créer l'accord</button>
+        </form>
+      )}
+
+      {syndicats.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state__glyph">—</div>
+            Aucun accord syndical enregistré.
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          {syndicats.map((s) => (
+            <div key={s.id} className="driver-badge" style={{ justifyContent: "space-between" }}>
+              <div>
+                <div className="driver-badge__name">{s.nom}</div>
+                <div className="driver-badge__meta">
+                  {s.zoneA} ↔ {s.zoneB} · {s.tarifJour} FCFA/jour · {s.telephone}
+                </div>
+              </div>
+              <button
+                onClick={() => basculerSyndicat(s.id)}
+                style={{ border: "none", background: "transparent", color: s.actif ? "var(--color-danger)" : "var(--color-success)", fontSize: 12, fontWeight: 600, padding: "6px 8px", flexShrink: 0 }}
+              >
+                {s.actif ? "Désactiver" : "Réactiver"}
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       <div style={{ height: 20 }} />

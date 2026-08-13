@@ -171,6 +171,21 @@ async function requireChauffeur(req, reply) {
   return rows[0];
 }
 
+async function requireSyndicat(req, reply) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) {
+    reply.code(401).send({ erreur: "Connexion syndicat requise." });
+    return null;
+  }
+  const { rows } = await pool.query("SELECT * FROM syndicats WHERE token = $1", [token]);
+  if (!rows[0]) {
+    reply.code(401).send({ erreur: "Connexion syndicat requise." });
+    return null;
+  }
+  return rows[0];
+}
+
 async function requireClient(req, reply) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
@@ -406,6 +421,131 @@ app.delete("/api/clients/moi/adresses/:index", async (req, reply) => {
     client.id,
   ]);
   return versClientDTO(rows[0]);
+});
+
+// ---------- Syndicats (cotisation forfaitaire par axe, en remplacement des péages au passage) ----------
+
+function versSyndicatDTO(row) {
+  return {
+    id: row.id,
+    nom: row.nom,
+    zoneA: row.zone_a,
+    zoneB: row.zone_b,
+    tarifJour: row.tarif_jour,
+    telephone: row.telephone,
+    actif: row.actif,
+  };
+}
+
+// Un axe est couvert si (zoneDepart,zoneArrivee) correspond au syndicat, dans un sens ou l'autre
+function axeCouvert(syndicat, zoneDepart, zoneArrivee) {
+  return (
+    (zoneDepart === syndicat.zone_a && zoneArrivee === syndicat.zone_b) ||
+    (zoneDepart === syndicat.zone_b && zoneArrivee === syndicat.zone_a)
+  );
+}
+
+app.post("/api/admin/syndicats", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { nom, zoneA, zoneB, tarifJour, telephone, codePin } = req.body || {};
+  if (!nom || !zoneA || !zoneB || !tarifJour || !telephone) {
+    return reply.code(400).send({ erreur: "nom, zoneA, zoneB, tarifJour et telephone sont requis." });
+  }
+  if (!ZONES.includes(zoneA) || !ZONES.includes(zoneB)) {
+    return reply.code(400).send({ erreur: `Zones invalides. Zones valides : ${ZONES.join(", ")}.` });
+  }
+  if (!/^\d{4}$/.test(codePin || "")) {
+    return reply.code(400).send({ erreur: "codePin doit être composé de 4 chiffres." });
+  }
+  const { rows: existant } = await pool.query("SELECT id FROM syndicats WHERE telephone = $1", [telephone]);
+  if (existant[0]) {
+    return reply.code(409).send({ erreur: "Un syndicat est déjà enregistré avec ce numéro." });
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO syndicats (id, nom, zone_a, zone_b, tarif_jour, telephone, code_pin_hash)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [id("synd"), nom, zoneA, zoneB, parseInt(tarifJour, 10), telephone, hashMotDePasse(codePin)]
+  );
+  return reply.code(201).send(versSyndicatDTO(rows[0]));
+});
+
+app.get("/api/admin/syndicats", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query("SELECT * FROM syndicats ORDER BY cree_le DESC");
+  return rows.map(versSyndicatDTO);
+});
+
+app.post("/api/admin/syndicats/:syndicatId/desactiver", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query("UPDATE syndicats SET actif = NOT actif WHERE id = $1 RETURNING *", [
+    req.params.syndicatId,
+  ]);
+  if (!rows[0]) return reply.code(404).send({ erreur: "Syndicat introuvable." });
+  return versSyndicatDTO(rows[0]);
+});
+
+app.post("/api/syndicats/connexion", async (req, reply) => {
+  const { telephone, codePin } = req.body || {};
+  const { rows } = await pool.query("SELECT * FROM syndicats WHERE telephone = $1", [telephone]);
+  const syndicat = rows[0];
+  if (!syndicat || !verifierMotDePasse(codePin || "", syndicat.code_pin_hash)) {
+    return reply.code(401).send({ erreur: "Numéro ou code incorrect." });
+  }
+  const token = id("tok");
+  const { rows: maj } = await pool.query("UPDATE syndicats SET token = $1 WHERE id = $2 RETURNING *", [
+    token,
+    syndicat.id,
+  ]);
+  return { ...versSyndicatDTO(maj[0]), token };
+});
+
+app.get("/api/syndicats/moi/cotisations", async (req, reply) => {
+  const syndicat = await requireSyndicat(req, reply);
+  if (!syndicat) return;
+  const jour = typeof req.query.jour === "string" ? req.query.jour : new Date().toISOString().slice(0, 10);
+
+  const { rows } = await pool.query(
+    `SELECT c.*, ch.nom AS chauffeur_nom, ch.badge AS chauffeur_badge, ch.telephone AS chauffeur_telephone
+     FROM cotisations c
+     JOIN chauffeurs ch ON ch.id = c.chauffeur_id
+     WHERE c.syndicat_id = $1 AND c.jour = $2
+     ORDER BY c.paye ASC, ch.nom ASC`,
+    [syndicat.id, jour]
+  );
+
+  const cotisations = rows.map((r) => ({
+    id: r.id,
+    chauffeurId: r.chauffeur_id,
+    chauffeurNom: r.chauffeur_nom,
+    chauffeurBadge: r.chauffeur_badge,
+    chauffeurTelephone: r.chauffeur_telephone,
+    jour: r.jour,
+    montant: r.montant,
+    paye: r.paye,
+    payeLe: r.paye_le,
+  }));
+
+  return {
+    syndicat: versSyndicatDTO(syndicat),
+    jour,
+    cotisations,
+    totalAttendu: cotisations.reduce((s, c) => s + c.montant, 0),
+    totalCollecte: cotisations.filter((c) => c.paye).reduce((s, c) => s + c.montant, 0),
+  };
+});
+
+app.post("/api/syndicats/cotisations/:cotisationId/marquer-paye", async (req, reply) => {
+  const syndicat = await requireSyndicat(req, reply);
+  if (!syndicat) return;
+  const { rows } = await pool.query(
+    "UPDATE cotisations SET paye = true, paye_le = now() WHERE id = $1 AND syndicat_id = $2 RETURNING *",
+    [req.params.cotisationId, syndicat.id]
+  );
+  if (!rows[0]) return reply.code(404).send({ erreur: "Cotisation introuvable." });
+  return { marque: true };
 });
 
 // ---------- Référentiel ----------
@@ -779,7 +919,10 @@ app.get("/api/rides", async (req) => {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const { rows } = await pool.query(`SELECT * FROM rides ${where} ORDER BY cree_le DESC`, valeurs);
+  // Limite de sécurité : en cas de pic (demande >> chauffeurs disponibles), on ne renvoie que
+  // les demandes les plus récentes plutôt que la liste entière, pour rester rapide pour tous.
+  const limite = statut === "demandee" && !chauffeurId ? "LIMIT 50" : "";
+  const { rows } = await pool.query(`SELECT * FROM rides ${where} ORDER BY cree_le DESC ${limite}`, valeurs);
   return rows.map((r) => versRideDTO(r));
 });
 
@@ -820,6 +963,23 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
     rideId: req.params.rideId,
     role: "client",
   }).catch(() => {});
+
+  // Cotisation syndicale forfaitaire du jour, si cet axe est couvert par un accord — une seule fois
+  // par chauffeur et par jour quel que soit le nombre de trajets sur l'axe (contrainte UNIQUE en base)
+  try {
+    const { rows: syndicatsActifs } = await pool.query("SELECT * FROM syndicats WHERE actif = true");
+    const syndicatConcerne = syndicatsActifs.find((s) => axeCouvert(s, rows[0].zone_depart, rows[0].zone_arrivee));
+    if (syndicatConcerne) {
+      await pool.query(
+        `INSERT INTO cotisations (id, syndicat_id, chauffeur_id, jour, montant)
+         VALUES ($1,$2,$3,CURRENT_DATE,$4)
+         ON CONFLICT (syndicat_id, chauffeur_id, jour) DO NOTHING`,
+        [id("cot"), syndicatConcerne.id, chauffeur.id, syndicatConcerne.tarif_jour]
+      );
+    }
+  } catch {
+    // Ne bloque jamais l'acceptation de la course pour un souci lié à la cotisation
+  }
 
   return versRideDTO(rowsFinal[0], chauffeur);
 });

@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import ClientView from "./components/ClientView.jsx";
 import DriverView from "./components/DriverView.jsx";
 import AdminView from "./components/AdminView.jsx";
+import SyndicatView from "./components/SyndicatView.jsx";
 
 const CLE_SESSION_ADMIN = "scm_admin_session";
 const CLE_SESSION_CLIENT = "scm_client_session";
@@ -20,7 +21,9 @@ function accesAdminAutorise() {
 function roleDepuisLien() {
   const params = new URLSearchParams(window.location.search);
   if (params.has("admin")) return "admin";
-  return params.get("role") === "chauffeur" ? "chauffeur" : "client";
+  const role = params.get("role");
+  if (role === "chauffeur" || role === "syndicat") return role;
+  return "client";
 }
 
 // Lien ouvert sans indication de rôle, mais avec les deux profils déjà enregistrés sur cet appareil :
@@ -107,6 +110,11 @@ export default function App() {
               Admin
             </button>
           )}
+          {(peutVoirAdmin || roleLien === "syndicat") && (
+            <button className={role === "syndicat" ? "is-active" : ""} onClick={() => setRole("syndicat")}>
+              Syndicat
+            </button>
+          )}
         </div>
       </header>
 
@@ -126,8 +134,10 @@ export default function App() {
             <ClientView zones={zones} onToast={showToast} courseIdDepuisNotification={new URLSearchParams(window.location.search).get("course")} />
           ) : role === "chauffeur" ? (
             <DriverView zones={zones} onToast={showToast} />
+          ) : role === "syndicat" ? (
+            <SyndicatView onToast={showToast} />
           ) : (
-            <AdminView onToast={showToast} />
+            <AdminView onToast={showToast} zones={zones} />
           )
         )}
       </main>
