@@ -168,6 +168,10 @@ async function requireChauffeur(req, reply) {
     reply.code(401).send({ erreur: "Connexion chauffeur requise." });
     return null;
   }
+  if (rows[0].statut === "desactive") {
+    reply.code(403).send({ erreur: "Compte désactivé. Contactez l'équipe Scotrans." });
+    return null;
+  }
   return rows[0];
 }
 
@@ -610,6 +614,9 @@ app.post("/api/chauffeurs/connexion", async (req, reply) => {
   if (!chauffeur || !chauffeur.code_pin_hash || !verifierMotDePasse(codePin || "", chauffeur.code_pin_hash)) {
     return reply.code(401).send({ erreur: "Numéro ou code incorrect." });
   }
+  if (chauffeur.statut === "desactive") {
+    return reply.code(403).send({ erreur: "Compte désactivé. Contactez l'équipe Scotrans." });
+  }
   const token = id("tok");
   const { rows: maj } = await pool.query("UPDATE chauffeurs SET token = $1 WHERE id = $2 RETURNING *", [
     token,
@@ -632,6 +639,28 @@ app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
     [req.params.chauffeurId]
   );
   if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  return versChauffeurDTO(rows[0]);
+});
+
+app.post("/api/chauffeurs/:chauffeurId/desactiver", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query(
+    `UPDATE chauffeurs SET statut = 'desactive' WHERE id = $1 AND statut = 'actif' RETURNING *`,
+    [req.params.chauffeurId]
+  );
+  if (!rows[0]) return reply.code(409).send({ erreur: "Seul un chauffeur actif peut être désactivé." });
+  return versChauffeurDTO(rows[0]);
+});
+
+app.post("/api/chauffeurs/:chauffeurId/reactiver", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { rows } = await pool.query(
+    `UPDATE chauffeurs SET statut = 'actif' WHERE id = $1 AND statut = 'desactive' RETURNING *`,
+    [req.params.chauffeurId]
+  );
+  if (!rows[0]) return reply.code(409).send({ erreur: "Seul un chauffeur désactivé peut être réactivé." });
   return versChauffeurDTO(rows[0]);
 });
 

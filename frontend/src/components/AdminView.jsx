@@ -107,6 +107,28 @@ export default function AdminView({ onToast, zones }) {
     }
   }
 
+  async function desactiver(c) {
+    const confirmation = window.confirm(`Désactiver ${c.nom} (${c.badge}) ? Il ne pourra plus se connecter ni recevoir de courses, mais son historique reste conservé.`);
+    if (!confirmation) return;
+    try {
+      await api.desactiverChauffeur(c.id, session.token);
+      onToast(`${c.nom} a été désactivé.`);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
+  async function reactiver(c) {
+    try {
+      await api.reactiverChauffeur(c.id, session.token);
+      onToast(`${c.nom} a été réactivé.`);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   async function marquerTraite(id) {
     try {
       await api.traiterSignalement(id, session.token);
@@ -169,8 +191,9 @@ export default function AdminView({ onToast, zones }) {
 
   if (loading) return <p className="card__hint">Chargement…</p>;
 
-  const enAttente = chauffeurs.filter((c) => c.statut !== "actif");
+  const enAttente = chauffeurs.filter((c) => c.statut === "en attente de validation");
   const actifs = chauffeurs.filter((c) => c.statut === "actif");
+  const desactives = chauffeurs.filter((c) => c.statut === "desactive");
 
   return (
     <div>
@@ -442,23 +465,50 @@ export default function AdminView({ onToast, zones }) {
                 <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
               </div>
             </div>
-            <button
-              onClick={() => supprimer(c)}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "var(--color-danger)",
-                fontSize: 12,
-                fontWeight: 600,
-                padding: "6px 8px",
-                flexShrink: 0,
-              }}
-            >
-              Supprimer
-            </button>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button
+                onClick={() => desactiver(c)}
+                style={{ border: "none", background: "transparent", color: "var(--color-ink-soft)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Désactiver
+              </button>
+              <button
+                onClick={() => supprimer(c)}
+                style={{ border: "none", background: "transparent", color: "var(--color-danger)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Supprimer
+              </button>
+            </div>
           </div>
         ))}
       </div>
+
+      {desactives.length > 0 && (
+        <>
+          <div style={{ height: 20 }} />
+          <p className="section-label">Chauffeurs désactivés ({desactives.length})</p>
+          <div style={{ height: 8 }} />
+          <div className="card">
+            {desactives.map((c) => (
+              <div key={c.id} className="driver-badge" style={{ justifyContent: "space-between", opacity: 0.7 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="driver-badge__avatar">{c.nom.split(" ").map((n) => n[0]).join("")}</div>
+                  <div>
+                    <div className="driver-badge__name">{c.nom} · {c.badge}</div>
+                    <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => reactiver(c)}
+                  style={{ border: "none", background: "transparent", color: "var(--color-success)", fontSize: 12, fontWeight: 600, padding: "6px 8px", flexShrink: 0 }}
+                >
+                  Réactiver
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
