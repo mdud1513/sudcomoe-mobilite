@@ -4,6 +4,7 @@ import ClientView from "./components/ClientView.jsx";
 import DriverView from "./components/DriverView.jsx";
 import AdminView from "./components/AdminView.jsx";
 import SyndicatView from "./components/SyndicatView.jsx";
+import { surInstallabiliteDisponible, declencherInstallation, dejaInstallee, estIOS } from "./installation.js";
 
 const CLE_SESSION_ADMIN = "scm_admin_session";
 const CLE_SESSION_CLIENT = "scm_client_session";
@@ -70,6 +71,8 @@ export default function App() {
   const [zones, setZones] = useState([]);
   const [toast, setToast] = useState(null);
   const [erreurApi, setErreurApi] = useState(false);
+  const [peutInstaller, setPeutInstaller] = useState(false);
+  const [bannièreFermee, setBannièreFermee] = useState(() => sessionStorage.getItem("scm_banniere_install_fermee") === "1");
 
   function showToast(message) {
     setToast(message);
@@ -82,6 +85,28 @@ export default function App() {
       .then(setZones)
       .catch(() => setErreurApi(true));
   }, []);
+
+  useEffect(() => {
+    surInstallabiliteDisponible(() => setPeutInstaller(true));
+  }, []);
+
+  function fermerBanniere() {
+    sessionStorage.setItem("scm_banniere_install_fermee", "1");
+    setBannièreFermee(true);
+  }
+
+  async function installer() {
+    const resultat = await declencherInstallation();
+    if (resultat.ok) {
+      showToast("Application installée ✅");
+      fermerBanniere();
+    } else if (resultat.raison === "dismissed") {
+      fermerBanniere();
+    }
+  }
+
+  const afficherBanniereInstall =
+    !bannièreFermee && !dejaInstallee() && (peutInstaller || estIOS());
 
   if (choixProfilRequis()) {
     return <ChoixProfil />;
@@ -117,6 +142,31 @@ export default function App() {
           )}
         </div>
       </header>
+
+      {afficherBanniereInstall && (
+        <div style={{ background: "var(--color-primary-tint)", padding: "12px 20px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--color-line)" }}>
+          <span style={{ fontSize: 20 }}>📲</span>
+          <div style={{ flex: 1, fontSize: 12.5, color: "var(--color-ink)" }}>
+            {estIOS() ? (
+              <>Ajoutez Scotrans à l'écran d'accueil : appuyez sur <strong>Partager</strong> puis <strong>« Sur l'écran d'accueil »</strong>.</>
+            ) : (
+              "Installez Scotrans comme une application, en un tap."
+            )}
+          </div>
+          {!estIOS() && (
+            <button className="btn btn--primary" style={{ width: "auto", padding: "8px 14px", fontSize: 12.5, flexShrink: 0 }} onClick={installer}>
+              Installer
+            </button>
+          )}
+          <button
+            onClick={fermerBanniere}
+            aria-label="Fermer"
+            style={{ border: "none", background: "transparent", color: "var(--color-ink-soft)", fontSize: 18, padding: "0 4px", flexShrink: 0 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <main className="app-body">
         {erreurApi && (
