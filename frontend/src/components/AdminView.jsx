@@ -15,6 +15,7 @@ export default function AdminView({ onToast, zones }) {
   });
   const [chauffeurs, setChauffeurs] = useState([]);
   const [stats, setStats] = useState(null);
+  const [bilanPilote, setBilanPilote] = useState(null);
   const [signalements, setSignalements] = useState([]);
   const [syndicats, setSyndicats] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -35,11 +36,12 @@ export default function AdminView({ onToast, zones }) {
   }
 
   async function charger() {
-    const [resultatChauffeurs, resultatStats, resultatSignalements, resultatSyndicats] = await Promise.allSettled([
+    const [resultatChauffeurs, resultatStats, resultatSignalements, resultatSyndicats, resultatBilan] = await Promise.allSettled([
       api.chauffeurs(),
       api.adminStatistiques(session.token),
       api.adminSignalements(session.token),
       api.adminListeSyndicats(session.token),
+      api.adminBilanPilote(session.token),
     ]);
 
     if (resultatChauffeurs.status === "fulfilled") {
@@ -62,6 +64,10 @@ export default function AdminView({ onToast, zones }) {
 
     if (resultatSyndicats.status === "fulfilled") {
       setSyndicats(resultatSyndicats.value);
+    }
+
+    if (resultatBilan.status === "fulfilled") {
+      setBilanPilote(resultatBilan.value);
     }
 
     setLoading(false);
@@ -232,6 +238,56 @@ export default function AdminView({ onToast, zones }) {
         <button className="btn btn--outline" onClick={() => setInviter(true)}>
           + Inviter un autre admin
         </button>
+      )}
+
+      {bilanPilote && (
+        <>
+          <div style={{ height: 20 }} />
+          <p className="section-label">Bilan du pilote</p>
+          <div style={{ height: 8 }} />
+          <div className="card">
+            <p className="card__hint" style={{ marginBottom: 12 }}>
+              {bilanPilote.depuisLe
+                ? `Depuis le ${new Date(bilanPilote.depuisLe).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })} · ${bilanPilote.nbChauffeursActifs} chauffeur${bilanPilote.nbChauffeursActifs > 1 ? "s" : ""} actif${bilanPilote.nbChauffeursActifs > 1 ? "s" : ""}`
+                : "Aucune donnée pour le moment."}
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>DEMANDES REÇUES</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.nbDemandesTotal}</div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>COURSES TERMINÉES</div>
+                <div className="ticket__amount" style={{ fontSize: 22, color: "var(--color-success)" }}>{bilanPilote.nbTerminees}</div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TAUX D'ACCEPTATION</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.tauxAcceptation}%</div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TAUX D'ANNULATION</div>
+                <div className="ticket__amount" style={{ fontSize: 22, color: bilanPilote.tauxAnnulation > 20 ? "var(--color-danger)" : "var(--color-ink)" }}>
+                  {bilanPilote.tauxAnnulation}%
+                </div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TEMPS D'ATTENTE RÉEL MOYEN</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.tempsAttenteReelMoyenMinutes} min</div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>MONTANT MOYEN / COURSE</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.montantMoyen} FCFA</div>
+              </div>
+            </div>
+            <p className="card__hint" style={{ marginBottom: 0 }}>
+              Chiffre d'affaires cumulé : <strong>{bilanPilote.caTotal} FCFA</strong> ·{" "}
+              {bilanPilote.nbSignalements} signalement{bilanPilote.nbSignalements > 1 ? "s" : ""} au total
+              {bilanPilote.nbSignalementsNonTraites > 0 && (
+                <span style={{ color: "var(--color-danger)" }}> (dont {bilanPilote.nbSignalementsNonTraites} non traité{bilanPilote.nbSignalementsNonTraites > 1 ? "s" : ""})</span>
+              )}
+            </p>
+          </div>
+        </>
       )}
 
       {stats && (

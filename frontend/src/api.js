@@ -90,6 +90,8 @@ export const api = {
     request("/api/admin/inviter", { method: "POST", body: JSON.stringify(payload), headers: { Authorization: `Bearer ${token}` } }),
   adminStatistiques: (token) =>
     request("/api/admin/statistiques", { headers: { Authorization: `Bearer ${token}` } }),
+  adminBilanPilote: (token) =>
+    request("/api/admin/bilan-pilote", { headers: { Authorization: `Bearer ${token}` } }),
   adminSignalements: (token) =>
     request("/api/admin/signalements", { headers: { Authorization: `Bearer ${token}` } }),
   traiterSignalement: (id, token) =>

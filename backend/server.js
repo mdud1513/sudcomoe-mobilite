@@ -281,6 +281,51 @@ app.get("/api/admin/liste", async (req, reply) => {
   return rows;
 });
 
+app.get("/api/admin/bilan-pilote", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+
+  const { rows } = await pool.query(`
+    SELECT
+      COUNT(*)::int AS nb_total,
+      COUNT(*) FILTER (WHERE statut = 'terminee')::int AS nb_terminees,
+      COUNT(*) FILTER (WHERE statut = 'annulee')::int AS nb_annulees,
+      COUNT(*) FILTER (WHERE premiere_acceptation_le IS NOT NULL)::int AS nb_acceptees,
+      COALESCE(AVG(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS montant_moyen,
+      COALESCE(SUM(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS ca_total,
+      COALESCE(AVG(EXTRACT(EPOCH FROM (premiere_acceptation_le - cree_le)) / 60) FILTER (WHERE premiere_acceptation_le IS NOT NULL), 0)::numeric(10,1) AS temps_attente_reel_moyen,
+      MIN(cree_le) AS depuis_le
+    FROM rides
+  `);
+  const r = rows[0];
+
+  const { rows: signalementsRows } = await pool.query(`
+    SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE traite = false)::int AS non_traites
+    FROM signalements
+  `);
+  const sig = signalementsRows[0];
+
+  const { rows: chauffeursRows } = await pool.query(`
+    SELECT COUNT(*)::int AS actifs FROM chauffeurs WHERE statut = 'actif'
+  `);
+
+  return {
+    depuisLe: r.depuis_le,
+    nbDemandesTotal: r.nb_total,
+    nbTerminees: r.nb_terminees,
+    nbAnnulees: r.nb_annulees,
+    nbAcceptees: r.nb_acceptees,
+    tauxAcceptation: r.nb_total > 0 ? Math.round((r.nb_acceptees / r.nb_total) * 1000) / 10 : 0,
+    tauxAnnulation: r.nb_total > 0 ? Math.round((r.nb_annulees / r.nb_total) * 1000) / 10 : 0,
+    montantMoyen: r.montant_moyen,
+    caTotal: r.ca_total,
+    tempsAttenteReelMoyenMinutes: Number(r.temps_attente_reel_moyen),
+    nbSignalements: sig.total,
+    nbSignalementsNonTraites: sig.non_traites,
+    nbChauffeursActifs: chauffeursRows[0].actifs,
+  };
+});
+
 app.get("/api/admin/statistiques", async (req, reply) => {
   const demandeur = await requireAdmin(req, reply);
   if (!demandeur) return;
@@ -968,7 +1013,8 @@ app.post("/api/rides/:rideId/accepter", async (req, reply) => {
   const { rows } = await pool.query(
     `UPDATE rides
      SET statut = 'confirmee', chauffeur_id = $1,
-         historique = historique || $2::jsonb
+         historique = historique || $2::jsonb,
+         premiere_acceptation_le = COALESCE(premiere_acceptation_le, now())
      WHERE id = $3 AND statut = 'demandee'
      RETURNING *`,
     [chauffeur.id, JSON.stringify([{ statut: "confirmee", horodatage: new Date().toISOString() }]), req.params.rideId]
