@@ -4,7 +4,9 @@ import ClientView from "./components/ClientView.jsx";
 import DriverView from "./components/DriverView.jsx";
 import AdminView from "./components/AdminView.jsx";
 import SyndicatView from "./components/SyndicatView.jsx";
+import SuiviPublic from "./components/SuiviPublic.jsx";
 import { surInstallabiliteDisponible, declencherInstallation, dejaInstallee, estIOS } from "./installation.js";
+import { lienSupportWhatsApp } from "./contact.js";
 
 const CLE_SESSION_ADMIN = "scm_admin_session";
 const CLE_SESSION_CLIENT = "scm_client_session";
@@ -108,6 +110,22 @@ export default function App() {
   const afficherBanniereInstall =
     !bannièreFermee && !dejaInstallee() && (peutInstaller || estIOS());
 
+  const rideIdSuivi = new URLSearchParams(window.location.search).get("suivi");
+  if (rideIdSuivi) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <p className="app-header__eyebrow">Sud-Comoé · Prototype</p>
+          <h1 className="app-header__title">Scotrans</h1>
+          <p className="app-header__sub">Suivi de trajet partagé</p>
+        </header>
+        <main className="app-body">
+          <SuiviPublic rideId={rideIdSuivi} />
+        </main>
+      </div>
+    );
+  }
+
   if (choixProfilRequis()) {
     return <ChoixProfil />;
   }
@@ -191,6 +209,35 @@ export default function App() {
           )
         )}
       </main>
+
+      {(role === "client" || role === "chauffeur") && (
+        <a
+          href={lienSupportWhatsApp()}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            position: "sticky",
+            bottom: 16,
+            marginLeft: "auto",
+            marginRight: 16,
+            marginTop: 16,
+            width: "fit-content",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#25D366",
+            color: "white",
+            textDecoration: "none",
+            padding: "10px 16px",
+            borderRadius: 999,
+            fontWeight: 600,
+            fontSize: 13,
+            boxShadow: "0 6px 18px -6px rgba(0,0,0,0.35)",
+          }}
+        >
+          💬 Besoin d'aide ?
+        </a>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>

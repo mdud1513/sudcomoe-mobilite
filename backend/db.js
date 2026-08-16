@@ -43,6 +43,7 @@ export async function initDb() {
   // Ajoute les colonnes si la table existait déjà avant cette mise à jour (migration douce, sans perte de données)
   await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS code_pin_hash TEXT;`);
   await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS token TEXT;`);
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS photo_base64 TEXT;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS rides (
@@ -77,6 +78,7 @@ export async function initDb() {
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeurs_refuses JSONB NOT NULL DEFAULT '[]';`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS position_arrivee JSONB;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS adresse_depart TEXT;`);
+  await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS motif_annulation TEXT;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS premiere_acceptation_le TIMESTAMPTZ;`);
 
   // Rattrapage : pour les courses créées avant l'ajout de cette colonne, on retrouve l'horodatage
@@ -159,6 +161,18 @@ export async function initDb() {
       paye_le TIMESTAMPTZ,
       cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (syndicat_id, chauffeur_id, jour)
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY,
+      ride_id TEXT NOT NULL REFERENCES rides(id),
+      auteur TEXT NOT NULL,
+      note INT NOT NULL CHECK (note BETWEEN 1 AND 5),
+      commentaire TEXT,
+      cree_le TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (ride_id, auteur)
     );
   `);
 

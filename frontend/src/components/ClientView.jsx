@@ -4,6 +4,7 @@ import Ticket from "./Ticket.jsx";
 import ClientAuth from "./ClientAuth.jsx";
 import ClientHistory from "./ClientHistory.jsx";
 import MapPicker from "./MapPicker.jsx";
+import NotationCourse from "./NotationCourse.jsx";
 import { abonnerCourse } from "../push.js";
 
 function distanceKmEntre(a, b) {
@@ -286,14 +287,19 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
     }
   }
 
-  async function handleAnnuler() {
+  const [choixMotifAnnulation, setChoixMotifAnnulation] = useState(false);
+
+  async function handleAnnuler(motif) {
     try {
-      const updated = await api.annuler(course.id);
+      const updated = await api.annuler(course.id, motif);
       setCourse(updated);
+      setChoixMotifAnnulation(false);
     } catch (err) {
       onToast(err.message);
     }
   }
+
+  const MOTIFS_ANNULATION = ["Trop long à attendre", "Prix trop élevé", "Changement de projet", "Autre raison"];
 
   async function handleTerminer() {
     if (!modePaiement) {
@@ -370,6 +376,25 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
   }
 
   if (course) {
+    if (choixMotifAnnulation) {
+      return (
+        <div className="card">
+          <p className="card__title" style={{ fontSize: 15 }}>Pourquoi annulez-vous ?</p>
+          <p className="card__hint">Ça nous aide à améliorer le service — un tap suffit.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {MOTIFS_ANNULATION.map((m) => (
+              <button key={m} className="btn btn--outline" onClick={() => handleAnnuler(m)}>
+                {m}
+              </button>
+            ))}
+          </div>
+          <div style={{ height: 10 }} />
+          <button className="btn btn--outline" style={{ borderStyle: "dashed" }} onClick={() => setChoixMotifAnnulation(false)}>
+            Ne pas annuler, retour
+          </button>
+        </div>
+      );
+    }
     return (
       <div>
         <Ticket course={course} contact={course.chauffeur} role="client" onToast={onToast} />
@@ -379,7 +404,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
             <p className="card__hint" style={{ textAlign: "center" }}>
               Un chauffeur affilié de la zone {course.zoneDepart} va accepter votre demande.
             </p>
-            <button className="btn btn--danger-outline" onClick={handleAnnuler}>
+            <button className="btn btn--danger-outline" onClick={() => setChoixMotifAnnulation(true)}>
               Annuler la demande
             </button>
           </div>
@@ -390,9 +415,7 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
             <p className="card__hint" style={{ textAlign: "center" }}>
               Votre chauffeur est en route vers vous.
             </p>
-            <button className="btn btn--danger-outline" onClick={() => {
-              if (window.confirm("Annuler cette course ? Le chauffeur est peut-être déjà en route.")) handleAnnuler();
-            }}>
+            <button className="btn btn--danger-outline" onClick={() => setChoixMotifAnnulation(true)}>
               Annuler la course
             </button>
           </div>
@@ -444,6 +467,15 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
             </div>
             <button className="btn btn--primary" onClick={handleTerminer}>Confirmer et terminer</button>
           </div>
+        )}
+
+        {course.statut === "terminee" && course.chauffeur && (
+          <NotationCourse
+            rideId={course.id}
+            auteur="client"
+            cible={course.chauffeur.nom?.split(" ")[0]}
+            onToast={onToast}
+          />
         )}
 
         {(course.statut === "terminee" || course.statut === "annulee") && (
@@ -721,6 +753,16 @@ export default function ClientView({ zones, onToast, courseIdDepuisNotification 
             <div className="ticket__code">≈ {estimation.distanceKm} km</div>
           )}
         </div>
+      )}
+
+      {estimation && (
+        <p className="card__hint" style={{ marginTop: -6, marginBottom: 14, textAlign: "center" }}>
+          {estimation.tempsAttenteEstime === null ? (
+            <span style={{ color: "var(--color-danger)" }}>⚠ Aucun chauffeur actif pour le moment</span>
+          ) : (
+            <>⏱ Chauffeur estimé à ≈{estimation.tempsAttenteEstime} min après acceptation</>
+          )}
+        </p>
       )}
 
       <button className="btn btn--accent" type="submit" disabled={loading}>

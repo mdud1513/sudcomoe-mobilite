@@ -5,6 +5,8 @@ import DriverRegister from "./DriverRegister.jsx";
 import DriverLogin from "./DriverLogin.jsx";
 import { demanderPermissionNotification, notifierNouvelleCourse } from "../alertes.js";
 import { abonnerChauffeur } from "../push.js";
+import { redimensionnerImage } from "../image.js";
+import NotationCourse from "./NotationCourse.jsx";
 
 const CLE_SESSION = "scm_chauffeur_session";
 
@@ -21,6 +23,8 @@ export default function DriverView({ zones, onToast }) {
   const [chauffeur, setChauffeur] = useState(null);
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
+  const [courseANoter, setCourseANoter] = useState(null);
+  const courseActiveRef = useRef(null);
   const [solde, setSolde] = useState(null);
   const [gains, setGains] = useState(null);
   const [alertesActives, setAlertesActives] = useState(false);
@@ -42,6 +46,23 @@ export default function DriverView({ zones, onToast }) {
     localStorage.removeItem(CLE_SESSION);
     setSession(null);
     setChauffeur(null);
+  }
+
+  async function changerPhoto(e) {
+    const fichier = e.target.files?.[0];
+    if (!fichier) return;
+    if (!fichier.type.startsWith("image/")) {
+      onToast("Veuillez choisir une image.");
+      return;
+    }
+    try {
+      const photoRedimensionnee = await redimensionnerImage(fichier);
+      const maj = await api.uploaderPhotoChauffeur(photoRedimensionnee, session.token);
+      setChauffeur(maj);
+      onToast("Photo mise à jour.");
+    } catch {
+      onToast("Impossible de traiter cette image — réessayez avec une photo plus légère.");
+    }
   }
 
   async function activerAlertes() {
@@ -81,6 +102,12 @@ export default function DriverView({ zones, onToast }) {
 
       setDemandes(enCours);
       const active = mesCourses.find((r) => ["confirmee", "arrivee"].includes(r.statut));
+      // Si la course qu'on suivait vient de passer à "terminée", on propose de noter le client
+      if (!active && courseActiveRef.current) {
+        const vientDeFinir = mesCourses.find((r) => r.id === courseActiveRef.current.id && r.statut === "terminee");
+        if (vientDeFinir) setCourseANoter(vientDeFinir);
+      }
+      courseActiveRef.current = active || null;
       setCourseActive(active || null);
       setSolde(mSolde);
       setGains(mGains);
@@ -225,7 +252,21 @@ export default function DriverView({ zones, onToast }) {
           </button>
         </div>
         <div className="driver-badge">
-          <div className="driver-badge__avatar">{chauffeur.nom.split(" ").map((n) => n[0]).join("")}</div>
+          <label style={{ cursor: "pointer", position: "relative" }}>
+            {chauffeur.photoBase64 ? (
+              <img
+                src={chauffeur.photoBase64}
+                alt=""
+                style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", display: "block" }}
+              />
+            ) : (
+              <div className="driver-badge__avatar">{chauffeur.nom.split(" ").map((n) => n[0]).join("")}</div>
+            )}
+            <span style={{ position: "absolute", bottom: -2, right: -2, background: "var(--color-primary)", color: "white", borderRadius: "50%", width: 16, height: 16, fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ✎
+            </span>
+            <input type="file" accept="image/*" capture="user" onChange={changerPhoto} style={{ display: "none" }} />
+          </label>
           <div>
             <div className="driver-badge__name">{chauffeur.nom} · {chauffeur.badge}</div>
             <div className="driver-badge__meta">

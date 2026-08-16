@@ -52,6 +52,7 @@ export default function Ticket({ course, children, contact, role, onToast }) {
           {course.nombrePassagers ? ` · ${course.nombrePassagers} passager${course.nombrePassagers > 1 ? "s" : ""}` : ""}
           {typeof course.distanceKm === "number" ? ` · ≈ ${course.distanceKm} km` : ""}
           {course.chauffeur ? ` · Chauffeur : ${course.chauffeur.nom} (${course.chauffeur.badge})` : ""}
+          {course.chauffeur?.vehicule?.immatriculation ? ` · Véhicule : ${course.chauffeur.vehicule.immatriculation}` : ""}
         </div>
         {course.adresseDepart && (
           <div className="ticket__meta" style={{ marginTop: 2 }}>
@@ -120,19 +121,28 @@ export default function Ticket({ course, children, contact, role, onToast }) {
         {children}
 
         {contact && ["confirmee", "arrivee", "terminee"].includes(statut) && (
-          <div className="btn-row" style={{ marginTop: 12 }}>
-            <a href={lienAppel(contact.telephone)} className="btn btn--primary" style={{ textDecoration: "none", textAlign: "center" }}>
-              📞 Appeler {contact.nom?.split(" ")[0] || ""}
-            </a>
-            <a
-              href={lienWhatsApp(contact.telephone, `Bonjour, au sujet de la course ${course.id.replace("ride_", "SCM-").toUpperCase()}`)}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn--outline"
-              style={{ textDecoration: "none", textAlign: "center" }}
-            >
-              💬 WhatsApp
-            </a>
+          <div style={{ marginTop: 12 }}>
+            {role === "client" && contact.photoBase64 && (
+              <img
+                src={contact.photoBase64}
+                alt=""
+                style={{ width: 56, height: 56, borderRadius: "50%", objectFit: "cover", marginBottom: 8, border: "2px solid var(--color-primary-tint)" }}
+              />
+            )}
+            <div className="btn-row">
+              <a href={lienAppel(contact.telephone)} className="btn btn--primary" style={{ textDecoration: "none", textAlign: "center" }}>
+                📞 Appeler {contact.nom?.split(" ")[0] || ""}
+              </a>
+              <a
+                href={lienWhatsApp(contact.telephone, `Bonjour, au sujet de la course ${course.id.replace("ride_", "SCM-").toUpperCase()}`)}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--outline"
+                style={{ textDecoration: "none", textAlign: "center" }}
+              >
+                💬 WhatsApp
+              </a>
+            </div>
           </div>
         )}
 
@@ -143,6 +153,32 @@ export default function Ticket({ course, children, contact, role, onToast }) {
             style={{ border: "none", background: "transparent", color: "var(--color-danger)", fontSize: 12.5, fontWeight: 600, padding: "10px 0 0", cursor: "pointer" }}
           >
             ⚠ Signaler un problème avec cette course
+          </button>
+        )}
+
+        {role === "client" && ["demandee", "confirmee", "arrivee"].includes(statut) && (
+          <button
+            type="button"
+            onClick={async () => {
+              const lien = `${window.location.origin}/?suivi=${course.id}`;
+              if (navigator.share) {
+                try {
+                  await navigator.share({ title: "Suivi de mon trajet Scotrans", url: lien });
+                  return;
+                } catch {
+                  // partage annulé par l'utilisateur : on retombe sur la copie du lien
+                }
+              }
+              try {
+                await navigator.clipboard.writeText(lien);
+                onToast?.("Lien de suivi copié — envoyez-le à un proche.");
+              } catch {
+                onToast?.(lien);
+              }
+            }}
+            style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12.5, fontWeight: 600, padding: "10px 0 0", cursor: "pointer", display: "block" }}
+          >
+            🔗 Partager mon trajet à un proche
           </button>
         )}
       </div>

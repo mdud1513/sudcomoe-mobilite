@@ -84,6 +84,15 @@ function estimerTempsAttente(zoneChauffeur, zoneDepart, positionDepart) {
   return minutes;
 }
 
+// Avant même de valider la demande : estimation basée sur le chauffeur actif le plus proche.
+// Renvoie null s'il n'y a aucun chauffeur actif (pour afficher un avertissement plutôt qu'un chiffre trompeur).
+async function estimerTempsAttenteAvantValidation(zoneDepart, positionDepart) {
+  const { rows: actifs } = await pool.query("SELECT zone FROM chauffeurs WHERE statut = 'actif'");
+  if (actifs.length === 0) return null;
+  const temps = actifs.map((c) => estimerTempsAttente(c.zone, zoneDepart, positionDepart));
+  return Math.min(...temps);
+}
+
 function tarif(zoneDepart, zoneArrivee, nombrePassagers, positionDepart, positionArrivee) {
   const n = Math.min(4, Math.max(1, parseInt(nombrePassagers, 10) || 1));
 
@@ -565,6 +574,9 @@ function versChauffeurDTO(row) {
     zone: row.zone,
     statut: row.statut,
     badge: row.badge,
+    photoBase64: row.photo_base64,
+    noteMoyenne: row.note_moyenne !== undefined ? (row.note_moyenne === null ? null : Number(row.note_moyenne)) : null,
+    nombreNotes: row.nombre_notes !== undefined ? row.nombre_notes : 0,
     vehicule: {
       id: `v_${row.id}`,
       chauffeurId: row.id,
@@ -576,7 +588,12 @@ function versChauffeurDTO(row) {
 }
 
 app.get("/api/chauffeurs", async () => {
-  const { rows } = await pool.query("SELECT * FROM chauffeurs ORDER BY cree_le");
+  const { rows } = await pool.query(`
+    SELECT c.*,
+      (SELECT ROUND(AVG(n.note), 1) FROM notes n JOIN rides r ON r.id = n.ride_id WHERE r.chauffeur_id = c.id AND n.auteur = 'client') AS note_moyenne,
+      (SELECT COUNT(*)::int FROM notes n JOIN rides r ON r.id = n.ride_id WHERE r.chauffeur_id = c.id AND n.auteur = 'client') AS nombre_notes
+    FROM chauffeurs c ORDER BY c.cree_le
+  `);
   return rows.map(versChauffeurDTO);
 });
 
@@ -631,6 +648,24 @@ app.get("/api/chauffeurs/moi", async (req, reply) => {
   return versChauffeurDTO(chauffeur);
 });
 
+app.post("/api/chauffeurs/moi/photo", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  const { photoBase64 } = req.body || {};
+  if (typeof photoBase64 !== "string" || !photoBase64.startsWith("data:image/")) {
+    return reply.code(400).send({ erreur: "photoBase64 doit être une image encodée en base64 (data:image/...)." });
+  }
+  // Limite à ~300 Ko encodés (~220 Ko réels) : largement suffisant pour un portrait compressé côté client
+  if (photoBase64.length > 300_000) {
+    return reply.code(400).send({ erreur: "Photo trop lourde — réessayez avec une image plus légère." });
+  }
+  const { rows } = await pool.query("UPDATE chauffeurs SET photo_base64 = $1 WHERE id = $2 RETURNING *", [
+    photoBase64,
+    chauffeur.id,
+  ]);
+  return versChauffeurDTO(rows[0]);
+});
+
 app.post("/api/chauffeurs/:chauffeurId/valider", async (req, reply) => {
   const demandeur = await requireAdmin(req, reply);
   if (!demandeur) return;
@@ -662,6 +697,20 @@ app.post("/api/chauffeurs/:chauffeurId/reactiver", async (req, reply) => {
   );
   if (!rows[0]) return reply.code(409).send({ erreur: "Seul un chauffeur désactivé peut être réactivé." });
   return versChauffeurDTO(rows[0]);
+});
+
+// Réinitialisation assistée : l'admin génère un nouveau code et le communique par téléphone au
+// chauffeur (pas de SMS/e-mail de vérification en place pour l'instant). Coupe aussi sa session en cours.
+app.post("/api/chauffeurs/:chauffeurId/reinitialiser-pin", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const nouveauPin = String(Math.floor(1000 + Math.random() * 9000));
+  const { rows } = await pool.query(
+    `UPDATE chauffeurs SET code_pin_hash = $1, token = NULL WHERE id = $2 RETURNING *`,
+    [hashMotDePasse(nouveauPin), req.params.chauffeurId]
+  );
+  if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  return { ...versChauffeurDTO(rows[0]), nouveauPin };
 });
 
 app.delete("/api/chauffeurs/:chauffeurId", async (req, reply) => {
@@ -731,6 +780,7 @@ function versRideDTO(row, chauffeur) {
     adresseArrivee: row.adresse_arrivee,
     adresseDepart: row.adresse_depart,
     positionArrivee: row.position_arrivee,
+    motifAnnulation: row.motif_annulation,
     nombrePassagers: row.nombre_passagers,
     position: row.position,
     arrets: row.arrets,
@@ -805,12 +855,15 @@ app.get("/api/devis", async (req, reply) => {
   const supplement =
     zoneDepart !== ZONE_AUTRE && zoneArrivee !== ZONE_AUTRE ? supplementArrets(zoneDepart, zoneArrivee, arretsZones) : { total: 0, details: [] };
 
+  const tempsAttenteEstime = await estimerTempsAttenteAvantValidation(zoneDepart, posDepart);
+
   return {
     distanceKm: distanceTrajet,
     tarifBase,
     supplementArrets: supplement.total,
     montant: tarifBase + supplement.total,
     detailArrets: supplement.details,
+    tempsAttenteEstime, // minutes, ou null si aucun chauffeur actif actuellement
   };
 });
 
@@ -921,6 +974,42 @@ app.get("/api/rides/:rideId", async (req, reply) => {
   const dto = await chargerRideAvecChauffeur(req.params.rideId);
   if (!dto) return reply.code(404).send({ erreur: "Course introuvable." });
   return dto;
+});
+
+// Suivi public en lecture seule — pensé pour être partagé avec un proche, sans exposer
+// le numéro du client (seul le nom, à titre indicatif, et les infos du chauffeur sont visibles).
+app.get("/api/rides/:rideId/suivi-public", async (req, reply) => {
+  const { rows } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
+  const ride = rows[0];
+  if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
+
+  let chauffeur = null;
+  if (ride.chauffeur_id) {
+    const { rows: cRows } = await pool.query("SELECT * FROM chauffeurs WHERE id = $1", [ride.chauffeur_id]);
+    chauffeur = cRows[0] || null;
+  }
+
+  return {
+    clientNom: ride.client_nom,
+    zoneDepart: ride.zone_depart,
+    zoneArrivee: ride.zone_arrivee,
+    statut: ride.statut,
+    distanceKm: ride.distance_km === null ? null : Number(ride.distance_km),
+    montant: ride.montant,
+    creeLe: ride.cree_le,
+    tempsAttenteMinutes: ride.temps_attente_minutes,
+    chauffeurArriveLe: ride.chauffeur_arrive_le,
+    position: ride.position,
+    chauffeur: chauffeur
+      ? {
+          nom: chauffeur.nom,
+          badge: chauffeur.badge,
+          telephone: chauffeur.telephone,
+          immatriculation: chauffeur.immatriculation,
+          photoBase64: chauffeur.photo_base64,
+        }
+      : null,
+  };
 });
 
 app.get("/api/rides", async (req) => {
@@ -1239,6 +1328,54 @@ app.post("/api/rides/:rideId/relancer-client", async (req, reply) => {
   return versRideDTO(rows[0], chauffeur);
 });
 
+// Notation bidirectionnelle : le client note le chauffeur, le chauffeur note le client —
+// une seule note par personne et par course, uniquement une fois la course terminée.
+app.post("/api/rides/:rideId/noter", async (req, reply) => {
+  const { auteur, note, commentaire } = req.body || {};
+  if (!["client", "chauffeur"].includes(auteur)) {
+    return reply.code(400).send({ erreur: "auteur doit être 'client' ou 'chauffeur'." });
+  }
+  const n = parseInt(note, 10);
+  if (!(n >= 1 && n <= 5)) {
+    return reply.code(400).send({ erreur: "note doit être un entier entre 1 et 5." });
+  }
+
+  const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
+  const ride = existant[0];
+  if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
+  if (ride.statut !== "terminee") {
+    return reply.code(409).send({ erreur: "Seule une course terminée peut être notée." });
+  }
+
+  if (auteur === "chauffeur") {
+    const chauffeur = await requireChauffeur(req, reply);
+    if (!chauffeur) return;
+    if (chauffeur.id !== ride.chauffeur_id) {
+      return reply.code(403).send({ erreur: "Vous n'étiez pas le chauffeur assigné à cette course." });
+    }
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO notes (id, ride_id, auteur, note, commentaire) VALUES ($1,$2,$3,$4,$5)`,
+      [id("note"), req.params.rideId, auteur, n, typeof commentaire === "string" ? commentaire.slice(0, 300) : null]
+    );
+  } catch (err) {
+    if (err.code === "23505") {
+      return reply.code(409).send({ erreur: "Cette course a déjà été notée par ce profil." });
+    }
+    throw err;
+  }
+  return reply.code(201).send({ enregistre: true });
+});
+
+app.get("/api/rides/:rideId/notes", async (req) => {
+  const { rows } = await pool.query("SELECT auteur, note, commentaire FROM notes WHERE ride_id = $1", [
+    req.params.rideId,
+  ]);
+  return rows;
+});
+
 app.post("/api/rides/:rideId/terminer", async (req, reply) => {
   const { modePaiement } = req.body || {};
   if (!["mobile_money", "especes"].includes(modePaiement)) {
@@ -1289,15 +1426,17 @@ app.post("/api/rides/:rideId/terminer", async (req, reply) => {
 });
 
 app.post("/api/rides/:rideId/annuler", async (req, reply) => {
+  const { motif } = req.body || {};
   const { rows: existant } = await pool.query("SELECT * FROM rides WHERE id = $1", [req.params.rideId]);
   const ride = existant[0];
   if (!ride) return reply.code(404).send({ erreur: "Course introuvable." });
   if (["terminee", "annulee"].includes(ride.statut)) {
     return reply.code(409).send({ erreur: "Cette course ne peut plus être annulée." });
   }
+  const motifValide = typeof motif === "string" ? motif.slice(0, 60) : null;
   const { rows } = await pool.query(
-    `UPDATE rides SET statut = 'annulee', historique = historique || $1::jsonb WHERE id = $2 RETURNING *`,
-    [JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString() }]), req.params.rideId]
+    `UPDATE rides SET statut = 'annulee', motif_annulation = $1, historique = historique || $2::jsonb WHERE id = $3 RETURNING *`,
+    [motifValide, JSON.stringify([{ statut: "annulee", horodatage: new Date().toISOString(), motif: motifValide }]), req.params.rideId]
   );
   return versRideDTO(rows[0]);
 });

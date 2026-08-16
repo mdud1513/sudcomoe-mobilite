@@ -15,3 +15,9 @@ export function lienWhatsApp(telephone, message = "") {
   const texte = message ? `?text=${encodeURIComponent(message)}` : "";
   return `https://wa.me/${numero}${texte}`;
 }
+
+// Numéro de support Scotrans — à ajuster si besoin
+export const SUPPORT_TELEPHONE = "0757091928";
+export function lienSupportWhatsApp(message = "Bonjour, j'ai besoin d'aide avec Scotrans.") {
+  return lienWhatsApp(SUPPORT_TELEPHONE, message);
+}

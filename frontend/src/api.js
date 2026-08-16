@@ -54,6 +54,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }),
   course: (id) => request(`/api/rides/${id}`),
+  suiviPublic: (id) => request(`/api/rides/${id}/suivi-public`),
   coursesDemandees: (zone, token) =>
     request(`/api/rides?statut=demandee${zone ? `&zone=${encodeURIComponent(zone)}` : ""}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -64,8 +65,15 @@ export const api = {
   clientIntrouvable: (id, token) => request(`/api/rides/${id}/client-introuvable`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   clientNeConfirmePas: (id, token) => request(`/api/rides/${id}/client-ne-confirme-pas`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   terminer: (id, modePaiement) => request(`/api/rides/${id}/terminer`, { method: "POST", body: JSON.stringify({ modePaiement }) }),
-  annuler: (id) => request(`/api/rides/${id}/annuler`, { method: "POST" }),
+  annuler: (id, motif) => request(`/api/rides/${id}/annuler`, { method: "POST", body: JSON.stringify({ motif }) }),
   contesterArrivee: (id) => request(`/api/rides/${id}/contester-arrivee`, { method: "POST" }),
+  noter: (rideId, auteur, note, commentaire, token) =>
+    request(`/api/rides/${rideId}/noter`, {
+      method: "POST",
+      body: JSON.stringify({ auteur, note, commentaire }),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }),
+  notesDeLaCourse: (rideId) => request(`/api/rides/${rideId}/notes`),
   signaler: (id, auteur, message) =>
     request(`/api/rides/${id}/signaler`, { method: "POST", body: JSON.stringify({ auteur, message }) }),
   solde: (chauffeurId, token) =>
@@ -73,6 +81,8 @@ export const api = {
   gains: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/gains`, { headers: { Authorization: `Bearer ${token}` } }),
   moi: (token) => request("/api/chauffeurs/moi", { headers: { Authorization: `Bearer ${token}` } }),
+  uploaderPhotoChauffeur: (photoBase64, token) =>
+    request("/api/chauffeurs/moi/photo", { method: "POST", body: JSON.stringify({ photoBase64 }), headers: { Authorization: `Bearer ${token}` } }),
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
   connexionChauffeur: (payload) => request("/api/chauffeurs/connexion", { method: "POST", body: JSON.stringify(payload) }),
   validerChauffeur: (chauffeurId, token) =>
@@ -81,6 +91,8 @@ export const api = {
     request(`/api/chauffeurs/${chauffeurId}/desactiver`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   reactiverChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/reactiver`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  reinitialiserPinChauffeur: (chauffeurId, token) =>
+    request(`/api/chauffeurs/${chauffeurId}/reinitialiser-pin`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   supprimerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
   adminExiste: () => request("/api/admin/existe"),

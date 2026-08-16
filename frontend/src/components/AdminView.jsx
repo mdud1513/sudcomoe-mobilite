@@ -135,6 +135,18 @@ export default function AdminView({ onToast, zones }) {
     }
   }
 
+  async function reinitialiserPin(c) {
+    const confirmation = window.confirm(`Réinitialiser le code de ${c.nom} ? Il devra utiliser un nouveau code et sera déconnecté de sa session actuelle.`);
+    if (!confirmation) return;
+    try {
+      const resultat = await api.reinitialiserPinChauffeur(c.id, session.token);
+      window.alert(`Nouveau code pour ${c.nom} : ${resultat.nouveauPin}\n\nCommuniquez-le-lui immédiatement par téléphone — il ne sera plus jamais affiché ensuite.`);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   async function marquerTraite(id) {
     try {
       await api.traiterSignalement(id, session.token);
@@ -525,7 +537,13 @@ export default function AdminView({ onToast, zones }) {
                 <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap" }}>
+              <button
+                onClick={() => reinitialiserPin(c)}
+                style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Code oublié
+              </button>
               <button
                 onClick={() => desactiver(c)}
                 style={{ border: "none", background: "transparent", color: "var(--color-ink-soft)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
