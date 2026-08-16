@@ -79,6 +79,24 @@ export async function initDb() {
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS adresse_depart TEXT;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS premiere_acceptation_le TIMESTAMPTZ;`);
 
+  // Rattrapage : pour les courses créées avant l'ajout de cette colonne, on retrouve l'horodatage
+  // de la première acceptation directement dans l'historique déjà enregistré (idempotent : ne
+  // touche que les lignes encore vides, sans jamais écraser une valeur déjà connue).
+  await pool.query(`
+    UPDATE rides
+    SET premiere_acceptation_le = (
+      SELECT (elem->>'horodatage')::timestamptz
+      FROM jsonb_array_elements(historique) AS elem
+      WHERE elem->>'statut' = 'confirmee'
+      ORDER BY (elem->>'horodatage')::timestamptz ASC
+      LIMIT 1
+    )
+    WHERE premiere_acceptation_le IS NULL
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(historique) AS elem WHERE elem->>'statut' = 'confirmee'
+      );
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admins (
       id TEXT PRIMARY KEY,

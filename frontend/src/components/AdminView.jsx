@@ -15,9 +15,9 @@ export default function AdminView({ onToast, zones }) {
   });
   const [chauffeurs, setChauffeurs] = useState([]);
   const [stats, setStats] = useState(null);
-  const [bilanPilote, setBilanPilote] = useState(null);
   const [signalements, setSignalements] = useState([]);
   const [syndicats, setSyndicats] = useState([]);
+  const [bilan, setBilan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [inviter, setInviter] = useState(false);
   const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
@@ -67,7 +67,7 @@ export default function AdminView({ onToast, zones }) {
     }
 
     if (resultatBilan.status === "fulfilled") {
-      setBilanPilote(resultatBilan.value);
+      setBilan(resultatBilan.value);
     }
 
     setLoading(false);
@@ -240,50 +240,54 @@ export default function AdminView({ onToast, zones }) {
         </button>
       )}
 
-      {bilanPilote && (
+      {bilan && (
         <>
           <div style={{ height: 20 }} />
           <p className="section-label">Bilan du pilote</p>
           <div style={{ height: 8 }} />
           <div className="card">
             <p className="card__hint" style={{ marginBottom: 12 }}>
-              {bilanPilote.depuisLe
-                ? `Depuis le ${new Date(bilanPilote.depuisLe).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })} · ${bilanPilote.nbChauffeursActifs} chauffeur${bilanPilote.nbChauffeursActifs > 1 ? "s" : ""} actif${bilanPilote.nbChauffeursActifs > 1 ? "s" : ""}`
-                : "Aucune donnée pour le moment."}
+              {bilan.totalCourses} demande{bilan.totalCourses > 1 ? "s" : ""} reçue{bilan.totalCourses > 1 ? "s" : ""} au total
+              {bilan.coursesEnCours > 0 && ` · ${bilan.coursesEnCours} en cours`}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
               <div>
-                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>DEMANDES REÇUES</div>
-                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.nbDemandesTotal}</div>
-              </div>
-              <div>
                 <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>COURSES TERMINÉES</div>
-                <div className="ticket__amount" style={{ fontSize: 22, color: "var(--color-success)" }}>{bilanPilote.nbTerminees}</div>
+                <div className="ticket__amount" style={{ fontSize: 22, color: "var(--color-success)" }}>{bilan.coursesTerminees}</div>
               </div>
               <div>
                 <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TAUX D'ACCEPTATION</div>
-                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.tauxAcceptation}%</div>
-              </div>
-              <div>
-                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TAUX D'ANNULATION</div>
-                <div className="ticket__amount" style={{ fontSize: 22, color: bilanPilote.tauxAnnulation > 20 ? "var(--color-danger)" : "var(--color-ink)" }}>
-                  {bilanPilote.tauxAnnulation}%
+                <div className="ticket__amount" style={{ fontSize: 22 }}>
+                  {bilan.tauxAcceptation === null ? "—" : `${bilan.tauxAcceptation}%`}
                 </div>
               </div>
               <div>
-                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TEMPS D'ATTENTE RÉEL MOYEN</div>
-                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.tempsAttenteReelMoyenMinutes} min</div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>TAUX D'ANNULATION</div>
+                <div className="ticket__amount" style={{ fontSize: 22, color: bilan.tauxAnnulation > 20 ? "var(--color-danger)" : "var(--color-ink)" }}>
+                  {bilan.tauxAnnulation === null ? "—" : `${bilan.tauxAnnulation}%`}
+                </div>
               </div>
               <div>
                 <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>MONTANT MOYEN / COURSE</div>
-                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilanPilote.montantMoyen} FCFA</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>{bilan.montantMoyen} FCFA</div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>ATTENTE RÉELLE MOYENNE</div>
+                <div className="ticket__amount" style={{ fontSize: 22 }}>
+                  {bilan.tempsAttenteReelMoyen === null ? "—" : `${bilan.tempsAttenteReelMoyen} min`}
+                </div>
+              </div>
+              <div>
+                <div className="card__hint" style={{ marginBottom: 2, fontSize: 11 }}>ATTENTE ESTIMÉE MOYENNE</div>
+                <div className="ticket__amount" style={{ fontSize: 22, color: "var(--color-ink-soft)" }}>
+                  {bilan.tempsAttenteEstimeMoyen === null ? "—" : `${bilan.tempsAttenteEstimeMoyen} min`}
+                </div>
               </div>
             </div>
             <p className="card__hint" style={{ marginBottom: 0 }}>
-              Chiffre d'affaires cumulé : <strong>{bilanPilote.caTotal} FCFA</strong> ·{" "}
-              {bilanPilote.nbSignalements} signalement{bilanPilote.nbSignalements > 1 ? "s" : ""} au total
-              {bilanPilote.nbSignalementsNonTraites > 0 && (
-                <span style={{ color: "var(--color-danger)" }}> (dont {bilanPilote.nbSignalementsNonTraites} non traité{bilanPilote.nbSignalementsNonTraites > 1 ? "s" : ""})</span>
+              {bilan.signalements.total} signalement{bilan.signalements.total > 1 ? "s" : ""} au total
+              {bilan.signalements.nonTraites > 0 && (
+                <span style={{ color: "var(--color-danger)" }}> (dont {bilan.signalements.nonTraites} non traité{bilan.signalements.nonTraites > 1 ? "s" : ""})</span>
               )}
             </p>
           </div>

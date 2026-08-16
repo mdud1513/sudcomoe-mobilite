@@ -94,6 +94,8 @@ export const api = {
     request("/api/admin/bilan-pilote", { headers: { Authorization: `Bearer ${token}` } }),
   adminSignalements: (token) =>
     request("/api/admin/signalements", { headers: { Authorization: `Bearer ${token}` } }),
+  adminBilanPilote: (token) =>
+    request("/api/admin/bilan-pilote", { headers: { Authorization: `Bearer ${token}` } }),
   traiterSignalement: (id, token) =>
     request(`/api/admin/signalements/${id}/traiter`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   pushClePublique: () => request("/api/push/cle-publique"),

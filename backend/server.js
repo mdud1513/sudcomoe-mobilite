@@ -281,51 +281,6 @@ app.get("/api/admin/liste", async (req, reply) => {
   return rows;
 });
 
-app.get("/api/admin/bilan-pilote", async (req, reply) => {
-  const demandeur = await requireAdmin(req, reply);
-  if (!demandeur) return;
-
-  const { rows } = await pool.query(`
-    SELECT
-      COUNT(*)::int AS nb_total,
-      COUNT(*) FILTER (WHERE statut = 'terminee')::int AS nb_terminees,
-      COUNT(*) FILTER (WHERE statut = 'annulee')::int AS nb_annulees,
-      COUNT(*) FILTER (WHERE premiere_acceptation_le IS NOT NULL)::int AS nb_acceptees,
-      COALESCE(AVG(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS montant_moyen,
-      COALESCE(SUM(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS ca_total,
-      COALESCE(AVG(EXTRACT(EPOCH FROM (premiere_acceptation_le - cree_le)) / 60) FILTER (WHERE premiere_acceptation_le IS NOT NULL), 0)::numeric(10,1) AS temps_attente_reel_moyen,
-      MIN(cree_le) AS depuis_le
-    FROM rides
-  `);
-  const r = rows[0];
-
-  const { rows: signalementsRows } = await pool.query(`
-    SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE traite = false)::int AS non_traites
-    FROM signalements
-  `);
-  const sig = signalementsRows[0];
-
-  const { rows: chauffeursRows } = await pool.query(`
-    SELECT COUNT(*)::int AS actifs FROM chauffeurs WHERE statut = 'actif'
-  `);
-
-  return {
-    depuisLe: r.depuis_le,
-    nbDemandesTotal: r.nb_total,
-    nbTerminees: r.nb_terminees,
-    nbAnnulees: r.nb_annulees,
-    nbAcceptees: r.nb_acceptees,
-    tauxAcceptation: r.nb_total > 0 ? Math.round((r.nb_acceptees / r.nb_total) * 1000) / 10 : 0,
-    tauxAnnulation: r.nb_total > 0 ? Math.round((r.nb_annulees / r.nb_total) * 1000) / 10 : 0,
-    montantMoyen: r.montant_moyen,
-    caTotal: r.ca_total,
-    tempsAttenteReelMoyenMinutes: Number(r.temps_attente_reel_moyen),
-    nbSignalements: sig.total,
-    nbSignalementsNonTraites: sig.non_traites,
-    nbChauffeursActifs: chauffeursRows[0].actifs,
-  };
-});
-
 app.get("/api/admin/statistiques", async (req, reply) => {
   const demandeur = await requireAdmin(req, reply);
   if (!demandeur) return;
@@ -1386,6 +1341,66 @@ app.post("/api/rides/:rideId/contester-arrivee", async (req, reply) => {
   }
 
   return { enregistre: true };
+});
+
+// Bilan consolidé du pilote : taux d'acceptation, temps d'attente réel (pas l'estimation),
+// taux d'annulation, montant moyen — les chiffres à présenter au syndicat/investisseurs/autorités.
+app.get("/api/admin/bilan-pilote", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+
+  const { rows: globalRows } = await pool.query(`
+    SELECT
+      COUNT(*)::int AS total_courses,
+      COUNT(*) FILTER (WHERE statut = 'terminee')::int AS terminees,
+      COUNT(*) FILTER (WHERE statut = 'annulee')::int AS annulees,
+      COUNT(*) FILTER (WHERE statut IN ('demandee','confirmee','arrivee'))::int AS en_cours,
+      COUNT(*) FILTER (WHERE chauffeur_id IS NOT NULL)::int AS acceptees_au_moins_une_fois,
+      COALESCE(AVG(montant) FILTER (WHERE statut = 'terminee'), 0)::int AS montant_moyen,
+      COALESCE(AVG(temps_attente_minutes) FILTER (WHERE temps_attente_minutes IS NOT NULL), 0)::numeric(10,1) AS temps_attente_estime_moyen
+    FROM rides
+  `);
+  const g = globalRows[0];
+
+  const { rows: attenteRows } = await pool.query(`
+    SELECT AVG(EXTRACT(EPOCH FROM (premiere_confirmee - creation)) / 60)::numeric(10,1) AS temps_attente_reel_moyen
+    FROM (
+      SELECT
+        (r.historique->0->>'horodatage')::timestamptz AS creation,
+        (
+          SELECT (elem->>'horodatage')::timestamptz
+          FROM jsonb_array_elements(r.historique) elem
+          WHERE elem->>'statut' = 'confirmee'
+          ORDER BY (elem->>'horodatage')::timestamptz ASC
+          LIMIT 1
+        ) AS premiere_confirmee
+      FROM rides r
+      WHERE r.chauffeur_id IS NOT NULL OR r.statut IN ('confirmee', 'arrivee', 'terminee')
+    ) sub
+    WHERE premiere_confirmee IS NOT NULL
+  `);
+  const tempsAttenteReelMoyen = attenteRows[0]?.temps_attente_reel_moyen;
+
+  const { rows: signalementsRows } = await pool.query(`
+    SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE NOT traite)::int AS non_traites FROM signalements
+  `);
+
+  const totalCourses = g.total_courses;
+  const tauxAcceptation = totalCourses > 0 ? Math.round((g.acceptees_au_moins_une_fois / totalCourses) * 1000) / 10 : null;
+  const tauxAnnulation = totalCourses > 0 ? Math.round((g.annulees / totalCourses) * 1000) / 10 : null;
+
+  return {
+    totalCourses,
+    coursesTerminees: g.terminees,
+    coursesAnnulees: g.annulees,
+    coursesEnCours: g.en_cours,
+    tauxAcceptation,
+    tauxAnnulation,
+    montantMoyen: g.montant_moyen,
+    tempsAttenteEstimeMoyen: g.temps_attente_estime_moyen === null ? null : Number(g.temps_attente_estime_moyen),
+    tempsAttenteReelMoyen: tempsAttenteReelMoyen === null ? null : Number(tempsAttenteReelMoyen),
+    signalements: { total: signalementsRows[0].total, nonTraites: signalementsRows[0].non_traites },
+  };
 });
 
 app.get("/api/admin/signalements", async (req, reply) => {
