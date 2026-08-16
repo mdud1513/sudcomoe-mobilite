@@ -9,6 +9,7 @@ import {
   notifierClientDeLaCourse,
   notifierChauffeur,
 } from "./push.js";
+import { envoyerSMS } from "./sms.js";
 
 const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
@@ -574,6 +575,7 @@ function versChauffeurDTO(row) {
     zone: row.zone,
     statut: row.statut,
     badge: row.badge,
+    pinTemporaire: row.pin_temporaire === true,
     photoBase64: row.photo_base64,
     noteMoyenne: row.note_moyenne !== undefined ? (row.note_moyenne === null ? null : Number(row.note_moyenne)) : null,
     nombreNotes: row.nombre_notes !== undefined ? row.nombre_notes : 0,
@@ -642,10 +644,90 @@ app.post("/api/chauffeurs/connexion", async (req, reply) => {
   return { ...versChauffeurDTO(maj[0]), token };
 });
 
+const DUREE_VALIDITE_OTP_MIN = 10;
+const DELAI_MIN_ENTRE_DEMANDES_OTP_MS = 60_000; // évite le spam de SMS (coût réel par envoi)
+
+// Le chauffeur demande un code de vérification par SMS pour réinitialiser son code PIN lui-même
+app.post("/api/chauffeurs/demander-otp", async (req, reply) => {
+  const { telephone } = req.body || {};
+  if (!telephone) {
+    return reply.code(400).send({ erreur: "telephone est requis." });
+  }
+  const { rows } = await pool.query("SELECT * FROM chauffeurs WHERE telephone = $1", [telephone]);
+  const chauffeur = rows[0];
+
+  // Réponse volontairement identique que le numéro existe ou non, pour ne pas révéler
+  // quels numéros sont enregistrés dans le système.
+  const reponseGenerique = { envoye: true, message: "Si ce numéro est enregistré, un code a été envoyé par SMS." };
+
+  if (!chauffeur) return reponseGenerique;
+
+  if (chauffeur.otp_expire_le) {
+    const dernierEnvoiApprox = new Date(chauffeur.otp_expire_le).getTime() - DUREE_VALIDITE_OTP_MIN * 60000;
+    if (Date.now() - dernierEnvoiApprox < DELAI_MIN_ENTRE_DEMANDES_OTP_MS) {
+      return reply.code(429).send({ erreur: "Un code a déjà été envoyé récemment. Patientez avant d'en redemander un." });
+    }
+  }
+
+  const otp = String(Math.floor(100000 + Math.random() * 900000)); // code à 6 chiffres
+  const expireLe = new Date(Date.now() + DUREE_VALIDITE_OTP_MIN * 60000);
+  await pool.query("UPDATE chauffeurs SET otp_hash = $1, otp_expire_le = $2 WHERE id = $3", [
+    hashMotDePasse(otp),
+    expireLe.toISOString(),
+    chauffeur.id,
+  ]);
+
+  await envoyerSMS(telephone, `Scotrans : votre code de vérification est ${otp}. Valable ${DUREE_VALIDITE_OTP_MIN} minutes.`);
+
+  return reponseGenerique;
+});
+
+// Vérifie le code reçu par SMS et enregistre le nouveau code PIN choisi par le chauffeur
+app.post("/api/chauffeurs/reinitialiser-avec-otp", async (req, reply) => {
+  const { telephone, otp, nouveauPin } = req.body || {};
+  if (!telephone || !otp || !/^\d{4}$/.test(nouveauPin || "")) {
+    return reply.code(400).send({ erreur: "telephone, otp et nouveauPin (4 chiffres) sont requis." });
+  }
+  const { rows } = await pool.query("SELECT * FROM chauffeurs WHERE telephone = $1", [telephone]);
+  const chauffeur = rows[0];
+  if (!chauffeur || !chauffeur.otp_hash || !chauffeur.otp_expire_le) {
+    return reply.code(401).send({ erreur: "Code invalide ou expiré. Redemandez un nouveau code." });
+  }
+  if (new Date(chauffeur.otp_expire_le).getTime() < Date.now()) {
+    return reply.code(401).send({ erreur: "Ce code a expiré. Redemandez un nouveau code." });
+  }
+  if (!verifierMotDePasse(otp, chauffeur.otp_hash)) {
+    return reply.code(401).send({ erreur: "Code incorrect." });
+  }
+
+  await pool.query(
+    "UPDATE chauffeurs SET code_pin_hash = $1, token = NULL, otp_hash = NULL, otp_expire_le = NULL WHERE id = $2",
+    [hashMotDePasse(nouveauPin), chauffeur.id]
+  );
+
+  return { reinitialise: true };
+});
+
 app.get("/api/chauffeurs/moi", async (req, reply) => {
   const chauffeur = await requireChauffeur(req, reply);
   if (!chauffeur) return;
   return versChauffeurDTO(chauffeur);
+});
+
+// Le chauffeur choisit son propre code définitif — notamment après un code temporaire
+// communiqué par l'admin (fonctionne aussi à tout moment, pas seulement pour ce cas).
+app.post("/api/chauffeurs/moi/changer-pin", async (req, reply) => {
+  const chauffeur = await requireChauffeur(req, reply);
+  if (!chauffeur) return;
+  const { nouveauPin } = req.body || {};
+  if (!/^\d{4}$/.test(nouveauPin || "")) {
+    return reply.code(400).send({ erreur: "nouveauPin doit être composé de 4 chiffres." });
+  }
+  const { rows } = await pool.query(
+    "UPDATE chauffeurs SET code_pin_hash = $1, pin_temporaire = false WHERE id = $2 RETURNING *",
+    [hashMotDePasse(nouveauPin), chauffeur.id]
+  );
+  return versChauffeurDTO(rows[0]);
 });
 
 app.post("/api/chauffeurs/moi/photo", async (req, reply) => {
@@ -706,7 +788,7 @@ app.post("/api/chauffeurs/:chauffeurId/reinitialiser-pin", async (req, reply) =>
   if (!demandeur) return;
   const nouveauPin = String(Math.floor(1000 + Math.random() * 9000));
   const { rows } = await pool.query(
-    `UPDATE chauffeurs SET code_pin_hash = $1, token = NULL WHERE id = $2 RETURNING *`,
+    `UPDATE chauffeurs SET code_pin_hash = $1, token = NULL, pin_temporaire = true WHERE id = $2 RETURNING *`,
     [hashMotDePasse(nouveauPin), req.params.chauffeurId]
   );
   if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });

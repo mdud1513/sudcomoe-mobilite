@@ -81,10 +81,15 @@ export const api = {
   gains: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/gains`, { headers: { Authorization: `Bearer ${token}` } }),
   moi: (token) => request("/api/chauffeurs/moi", { headers: { Authorization: `Bearer ${token}` } }),
+  changerPinChauffeur: (nouveauPin, token) =>
+    request("/api/chauffeurs/moi/changer-pin", { method: "POST", body: JSON.stringify({ nouveauPin }), headers: { Authorization: `Bearer ${token}` } }),
   uploaderPhotoChauffeur: (photoBase64, token) =>
     request("/api/chauffeurs/moi/photo", { method: "POST", body: JSON.stringify({ photoBase64 }), headers: { Authorization: `Bearer ${token}` } }),
   inscrireChauffeur: (payload) => request("/api/chauffeurs", { method: "POST", body: JSON.stringify(payload) }),
   connexionChauffeur: (payload) => request("/api/chauffeurs/connexion", { method: "POST", body: JSON.stringify(payload) }),
+  demanderOtpChauffeur: (telephone) => request("/api/chauffeurs/demander-otp", { method: "POST", body: JSON.stringify({ telephone }) }),
+  reinitialiserAvecOtpChauffeur: (payload) =>
+    request("/api/chauffeurs/reinitialiser-avec-otp", { method: "POST", body: JSON.stringify(payload) }),
   validerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/valider`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   desactiverChauffeur: (chauffeurId, token) =>

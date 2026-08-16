@@ -21,6 +21,8 @@ export default function DriverView({ zones, onToast }) {
   });
   const [inscription, setInscription] = useState(false);
   const [chauffeur, setChauffeur] = useState(null);
+  const [nouveauPinObligatoire, setNouveauPinObligatoire] = useState("");
+  const [changementPinEnCours, setChangementPinEnCours] = useState(false);
   const [demandes, setDemandes] = useState([]);
   const [courseActive, setCourseActive] = useState(null);
   const [courseANoter, setCourseANoter] = useState(null);
@@ -240,6 +242,52 @@ export default function DriverView({ zones, onToast }) {
 
   if (!chauffeur) {
     return <p className="card__hint">Chargement…</p>;
+  }
+
+  if (chauffeur.pinTemporaire) {
+    async function validerNouveauPin(e) {
+      e.preventDefault();
+      if (!/^\d{4}$/.test(nouveauPinObligatoire)) {
+        onToast("Choisissez un code à 4 chiffres.");
+        return;
+      }
+      setChangementPinEnCours(true);
+      try {
+        const maj = await api.changerPinChauffeur(nouveauPinObligatoire, session.token);
+        setChauffeur(maj);
+        setNouveauPinObligatoire("");
+        onToast("Votre nouveau code est enregistré.");
+      } catch (err) {
+        onToast(err.message);
+      } finally {
+        setChangementPinEnCours(false);
+      }
+    }
+
+    return (
+      <form className="card" onSubmit={validerNouveauPin}>
+        <p className="card__title">Choisissez votre code définitif</p>
+        <p className="card__hint">
+          Le code que l'équipe Scotrans vient de vous communiquer est temporaire. Choisissez
+          maintenant votre propre code à 4 chiffres, que vous seul connaîtrez.
+        </p>
+        <div className="field">
+          <label htmlFor="nouveau-pin-oblig">Nouveau code à 4 chiffres</label>
+          <input
+            id="nouveau-pin-oblig"
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            value={nouveauPinObligatoire}
+            onChange={(e) => setNouveauPinObligatoire(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="••••"
+          />
+        </div>
+        <button className="btn btn--primary" type="submit" disabled={changementPinEnCours}>
+          {changementPinEnCours ? "…" : "Valider mon code"}
+        </button>
+      </form>
+    );
   }
 
   return (

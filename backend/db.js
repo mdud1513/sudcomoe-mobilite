@@ -43,6 +43,9 @@ export async function initDb() {
   // Ajoute les colonnes si la table existait déjà avant cette mise à jour (migration douce, sans perte de données)
   await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS code_pin_hash TEXT;`);
   await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS token TEXT;`);
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS otp_hash TEXT;`);
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS otp_expire_le TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS pin_temporaire BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE chauffeurs ADD COLUMN IF NOT EXISTS photo_base64 TEXT;`);
 
   await pool.query(`
