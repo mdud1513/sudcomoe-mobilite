@@ -98,6 +98,8 @@ export const api = {
     request(`/api/chauffeurs/${chauffeurId}/reactiver`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
   reinitialiserPinChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}/reinitialiser-pin`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }),
+  modifierBadgeChauffeur: (chauffeurId, badge, token) =>
+    request(`/api/chauffeurs/${chauffeurId}/modifier-badge`, { method: "POST", body: JSON.stringify({ badge }), headers: { Authorization: `Bearer ${token}` } }),
   supprimerChauffeur: (chauffeurId, token) =>
     request(`/api/chauffeurs/${chauffeurId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }),
   adminExiste: () => request("/api/admin/existe"),

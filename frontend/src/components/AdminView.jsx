@@ -161,6 +161,18 @@ export default function AdminView({ onToast, zones }) {
     }
   }
 
+  async function modifierBadge(c) {
+    const nouveauBadge = window.prompt(`Nouveau badge pour ${c.nom} :`, c.badge);
+    if (!nouveauBadge || nouveauBadge.trim() === c.badge) return;
+    try {
+      await api.modifierBadgeChauffeur(c.id, nouveauBadge.trim(), session.token);
+      onToast(`Badge de ${c.nom} mis à jour : ${nouveauBadge.trim()}`);
+      charger();
+    } catch (err) {
+      onToast(err.message);
+    }
+  }
+
   async function marquerTraite(id) {
     try {
       await api.traiterSignalement(id, session.token);
@@ -562,6 +574,12 @@ export default function AdminView({ onToast, zones }) {
             </div>
             <div style={{ display: "flex", gap: 4, flexShrink: 0, flexWrap: "wrap" }}>
               <button
+                onClick={() => modifierBadge(c)}
+                style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+              >
+                Modifier badge
+              </button>
+              <button
                 onClick={() => reinitialiserPin(c)}
                 style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
               >
@@ -599,12 +617,20 @@ export default function AdminView({ onToast, zones }) {
                     <div className="driver-badge__meta">{c.telephone} · Zone {c.zone}</div>
                   </div>
                 </div>
-                <button
-                  onClick={() => reactiver(c)}
-                  style={{ border: "none", background: "transparent", color: "var(--color-success)", fontSize: 12, fontWeight: 600, padding: "6px 8px", flexShrink: 0 }}
-                >
-                  Réactiver
-                </button>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <button
+                    onClick={() => modifierBadge(c)}
+                    style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+                  >
+                    Modifier badge
+                  </button>
+                  <button
+                    onClick={() => reactiver(c)}
+                    style={{ border: "none", background: "transparent", color: "var(--color-success)", fontSize: 12, fontWeight: 600, padding: "6px 8px" }}
+                  >
+                    Réactiver
+                  </button>
+                </div>
               </div>
             ))}
           </div>

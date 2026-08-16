@@ -803,6 +803,31 @@ app.post("/api/chauffeurs/:chauffeurId/reinitialiser-pin", async (req, reply) =>
   return { ...versChauffeurDTO(rows[0]), nouveauPin };
 });
 
+// Correction manuelle d'un badge par l'admin — notamment pour résoudre d'anciens doublons
+// (avant l'introduction de la séquence garantissant l'unicité pour les nouvelles inscriptions).
+app.post("/api/chauffeurs/:chauffeurId/modifier-badge", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { badge } = req.body || {};
+  const badgePropre = typeof badge === "string" ? badge.trim().slice(0, 20) : "";
+  if (!badgePropre) {
+    return reply.code(400).send({ erreur: "badge est requis." });
+  }
+  const { rows: existant } = await pool.query("SELECT id FROM chauffeurs WHERE badge = $1 AND id != $2", [
+    badgePropre,
+    req.params.chauffeurId,
+  ]);
+  if (existant[0]) {
+    return reply.code(409).send({ erreur: `Le badge "${badgePropre}" est déjà utilisé par un autre chauffeur.` });
+  }
+  const { rows } = await pool.query("UPDATE chauffeurs SET badge = $1 WHERE id = $2 RETURNING *", [
+    badgePropre,
+    req.params.chauffeurId,
+  ]);
+  if (!rows[0]) return reply.code(404).send({ erreur: "Chauffeur introuvable." });
+  return versChauffeurDTO(rows[0]);
+});
+
 app.delete("/api/chauffeurs/:chauffeurId", async (req, reply) => {
   const demandeur = await requireAdmin(req, reply);
   if (!demandeur) return;
