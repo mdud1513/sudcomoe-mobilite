@@ -8,6 +8,7 @@ import {
   notifierChauffeursActifs,
   notifierClientDeLaCourse,
   notifierChauffeur,
+  notifierAdmins,
 } from "./push.js";
 import { envoyerSMS } from "./sms.js";
 
@@ -614,8 +615,8 @@ app.post("/api/chauffeurs", async (req, reply) => {
   if (existant[0]) {
     return reply.code(409).send({ erreur: "Un chauffeur est déjà enregistré avec ce numéro." });
   }
-  const { rows: compte } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
-  const badge = `SCM-${String(compte[0].n + 1).padStart(3, "0")}`;
+  const { rows: numero } = await pool.query("SELECT nextval('badge_chauffeur_seq')::int AS n");
+  const badge = `SCM-${String(numero[0].n).padStart(3, "0")}`;
   const chauffeurId = id("u");
   const token = id("tok");
   const { rows } = await pool.query(
@@ -623,6 +624,13 @@ app.post("/api/chauffeurs", async (req, reply) => {
      VALUES ($1,$2,$3,$4,'en attente de validation',$5,$6,'à diagnostiquer',NULL,$7,$8) RETURNING *`,
     [chauffeurId, nom, telephone, zone, badge, immatriculation, hashMotDePasse(codePin), token]
   );
+
+  notifierAdmins({
+    titre: "Nouvelle inscription chauffeur",
+    corps: `${nom} (${badge}, zone ${zone}) attend une validation.`,
+    role: "admin",
+  }).catch(() => {});
+
   return reply.code(201).send({ ...versChauffeurDTO(rows[0]), token });
 });
 
@@ -1664,6 +1672,17 @@ app.post("/api/push/abonner-chauffeur", async (req, reply) => {
     return reply.code(400).send({ erreur: "subscription invalide." });
   }
   await enregistrerAbonnement({ chauffeurId: chauffeur.id, subscription });
+  return { abonne: true };
+});
+
+app.post("/api/push/abonner-admin", async (req, reply) => {
+  const demandeur = await requireAdmin(req, reply);
+  if (!demandeur) return;
+  const { subscription } = req.body || {};
+  if (!subscription?.endpoint || !subscription?.keys) {
+    return reply.code(400).send({ erreur: "subscription invalide." });
+  }
+  await enregistrerAbonnement({ adminId: demandeur.id, subscription });
   return { abonne: true };
 });
 

@@ -48,3 +48,11 @@ export async function abonnerCourse(rideId) {
   await api.pushAbonnerCourse(rideId, resultat.subscription);
   return resultat;
 }
+
+// Abonnement permanent pour un admin : reçoit les nouvelles inscriptions chauffeur à valider
+export async function abonnerAdmin(token) {
+  const resultat = await creerAbonnement();
+  if (!resultat.ok) return resultat;
+  await api.pushAbonnerAdmin(resultat.subscription, token);
+  return resultat;
+}

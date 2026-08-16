@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import AdminLogin from "./AdminLogin.jsx";
+import { abonnerAdmin } from "../push.js";
 
 const CLE_SESSION = "scm_admin_session";
 
@@ -23,6 +24,19 @@ export default function AdminView({ onToast, zones }) {
   const [formInvite, setFormInvite] = useState({ nom: "", telephone: "", motDePasse: "" });
   const [nouveauSyndicat, setNouveauSyndicat] = useState(false);
   const [formSyndicat, setFormSyndicat] = useState({ nom: "", zoneA: "", zoneB: "", tarifJour: "", telephone: "", codePin: "" });
+  const [alertesActives, setAlertesActives] = useState(false);
+
+  async function activerAlertes() {
+    const resultat = await abonnerAdmin(session.token);
+    if (resultat.ok) {
+      setAlertesActives(true);
+      onToast("Alertes activées — vous serez notifié des nouvelles inscriptions à valider.");
+    } else if (resultat.raison === "refuse") {
+      onToast("Notifications refusées — activables plus tard dans les réglages du navigateur.");
+    } else {
+      onToast("Notifications non disponibles sur cet appareil/navigateur.");
+    }
+  }
 
   function connecte(nouvelleSession) {
     localStorage.setItem(CLE_SESSION, JSON.stringify(nouvelleSession));
@@ -250,6 +264,15 @@ export default function AdminView({ onToast, zones }) {
         <button className="btn btn--outline" onClick={() => setInviter(true)}>
           + Inviter un autre admin
         </button>
+      )}
+
+      {!alertesActives && (
+        <>
+          <div style={{ height: 10 }} />
+          <button className="btn btn--outline" onClick={activerAlertes}>
+            🔔 Activer les alertes de nouvelle inscription
+          </button>
+        </>
       )}
 
       {bilan && (

@@ -184,17 +184,25 @@ export async function initDb() {
       id TEXT PRIMARY KEY,
       chauffeur_id TEXT REFERENCES chauffeurs(id),
       ride_id TEXT REFERENCES rides(id),
+      admin_id TEXT REFERENCES admins(id),
       endpoint TEXT UNIQUE NOT NULL,
       p256dh TEXT NOT NULL,
       auth TEXT NOT NULL,
       cree_le TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await pool.query(`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS admin_id TEXT REFERENCES admins(id);`);
 
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_arrive_le TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS chauffeur_position_arrivee JSONB;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS arrivee_destination_le TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS derniere_relance_le TIMESTAMPTZ;`);
+
+  // Séquence dédiée aux badges chauffeur (SCM-001, SCM-002...) : contrairement à un simple
+  // "COUNT(*) + 1", une séquence ne recule jamais et ne réattribue jamais un numéro déjà utilisé,
+  // même après suppression d'un chauffeur. Seule la structure est créée ici — la synchronisation
+  // avec les badges existants se fait plus bas, une fois les données (dont le semis) en place.
+  await pool.query(`CREATE SEQUENCE IF NOT EXISTS badge_chauffeur_seq START 1;`);
 
   // Semis des 3 chauffeurs de démonstration, uniquement si la table est vide (premier démarrage)
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM chauffeurs");
@@ -213,4 +221,13 @@ export async function initDb() {
     }
     console.log("Chauffeurs de démonstration insérés (premier démarrage).");
   }
+
+  // Synchronisation finale : la séquence ne doit jamais renvoyer un numéro déjà présent en base,
+  // qu'il s'agisse des chauffeurs de démo tout juste semés ou de chauffeurs déjà existants.
+  await pool.query(`
+    SELECT setval('badge_chauffeur_seq', GREATEST(
+      (SELECT last_value FROM badge_chauffeur_seq),
+      COALESCE((SELECT MAX(CAST(SUBSTRING(badge FROM 5) AS INT)) FROM chauffeurs WHERE badge ~ '^SCM-[0-9]+$'), 0)
+    ));
+  `);
 }

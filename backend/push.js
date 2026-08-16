@@ -20,14 +20,14 @@ export function clePublique() {
   return VAPID_PUBLIC_KEY;
 }
 
-export async function enregistrerAbonnement({ chauffeurId, rideId, subscription }) {
+export async function enregistrerAbonnement({ chauffeurId, rideId, adminId, subscription }) {
   await pool.query(
-    `INSERT INTO push_subscriptions (id, chauffeur_id, ride_id, endpoint, p256dh, auth)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (endpoint) DO UPDATE SET chauffeur_id = $2, ride_id = $3, p256dh = $5, auth = $6`,
-    [id("push"), chauffeurId || null, rideId || null, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth]
+    `INSERT INTO push_subscriptions (id, chauffeur_id, ride_id, admin_id, endpoint, p256dh, auth)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (endpoint) DO UPDATE SET chauffeur_id = $2, ride_id = $3, admin_id = $4, p256dh = $6, auth = $7`,
+    [id("push"), chauffeurId || null, rideId || null, adminId || null, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth]
   );
-  console.log(`[push] Abonnement enregistré (chauffeurId=${chauffeurId || "n/a"}, rideId=${rideId || "n/a"}).`);
+  console.log(`[push] Abonnement enregistré (chauffeurId=${chauffeurId || "n/a"}, rideId=${rideId || "n/a"}, adminId=${adminId || "n/a"}).`);
 }
 
 async function envoyerA(rows, payload) {
@@ -71,5 +71,10 @@ export async function notifierClientDeLaCourse(rideId, payload) {
 
 export async function notifierChauffeur(chauffeurId, payload) {
   const { rows } = await pool.query("SELECT * FROM push_subscriptions WHERE chauffeur_id = $1", [chauffeurId]);
+  await envoyerA(rows, payload);
+}
+
+export async function notifierAdmins(payload) {
+  const { rows } = await pool.query("SELECT * FROM push_subscriptions WHERE admin_id IS NOT NULL");
   await envoyerA(rows, payload);
 }

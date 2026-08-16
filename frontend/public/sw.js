@@ -46,7 +46,11 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const { rideId, role } = event.notification.data || {};
   const params = new URLSearchParams();
-  if (role) params.set("role", role);
+  if (role === "admin") {
+    params.set("admin", "1"); // convention existante de l'appli, distincte de ?role=...
+  } else if (role) {
+    params.set("role", role);
+  }
   if (rideId) params.set("course", rideId);
   const cible = `/${params.toString() ? `?${params.toString()}` : ""}`;
 

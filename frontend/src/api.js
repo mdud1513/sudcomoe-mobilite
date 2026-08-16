@@ -118,6 +118,8 @@ export const api = {
   pushClePublique: () => request("/api/push/cle-publique"),
   pushAbonnerChauffeur: (subscription, token) =>
     request("/api/push/abonner-chauffeur", { method: "POST", body: JSON.stringify({ subscription }), headers: { Authorization: `Bearer ${token}` } }),
+  pushAbonnerAdmin: (subscription, token) =>
+    request("/api/push/abonner-admin", { method: "POST", body: JSON.stringify({ subscription }), headers: { Authorization: `Bearer ${token}` } }),
   pushAbonnerCourse: (rideId, subscription) =>
     request(`/api/push/abonner-course/${rideId}`, { method: "POST", body: JSON.stringify({ subscription }) }),
   arriveeClient: (id, token, position) =>
